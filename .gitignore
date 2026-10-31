@@ -55,18 +55,11 @@ tmp/
 *.tmp
 *.log
 
-# Test files from root
-/test_*.py
-!tests/test_*.py
-
 # User uploaded files
 *.pdf
 *.docx
 !docs/*.pdf
 !docs/*.docx
-
-# Streamlit
-.streamlit/
 
 # Playwright
 .playwright/

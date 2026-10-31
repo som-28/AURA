@@ -40,7 +40,7 @@ User goal
 
 ### User interface
 
-The Streamlit application provides:
+The browser-native workspace provides:
 
 - A goal-first Start view.
 - Resume analysis and job matching.
@@ -49,12 +49,12 @@ The Streamlit application provides:
 - Insights calculated from persisted runs.
 - Live task events, verification, and recovery details.
 
-The interface uses a warm paper canvas, navy navigation styling, coral actions, teal execution accents, modular typography, responsive spacing, and no emoji-based UI controls.
+The interface is built with HTML, CSS, and JavaScript as a responsive, page-based workspace. It uses an understated graph-paper backdrop, inline numbered navigation, a dark/light theme switch, Space Grotesk headings, and IBM Plex Mono labels. Most sections sit directly on the canvas; the goal composer and resume uploader remain framed as task controls. The frontend has no separate Node, npm, or build-server requirement and calls the existing FastAPI endpoints.
 
 ## Architecture
 
 ```text
-Streamlit UI
+Browser workspace (HTML, CSS, JavaScript)
     |
     v
 FastAPI backend
@@ -78,11 +78,15 @@ FastAPI backend
     +--> Atomic JSON run store
 ```
 
-The backend owns execution and persistence. The Streamlit UI calls the backend for task execution, run history, resume analysis, job matching, capabilities, and evaluation data.
+The backend owns execution and persistence. The browser UI calls the existing FastAPI endpoints for task execution, run history, resume analysis, job matching, capabilities, memory, and evaluation data.
 
 ## Project Structure
 
 ```text
+web/
+├── index.html              # Browser-native AURA workspace
+├── styles.css              # Graph-paper themes and responsive layout
+└── app.js                  # Navigation and API-backed interactions
 src/
 ├── agent/
 │   ├── controller.py       # Dependency-aware execution and events
@@ -96,10 +100,6 @@ src/
 │   ├── tool_registry.py    # Registered tool metadata
 │   └── verifier.py         # Deterministic output verification
 ├── tools/                  # Independent tool adapters
-├── ui/
-│   ├── components.py       # Reusable Streamlit components
-│   └── theme.py            # AURA visual system
-├── app_gui.py              # Streamlit entry point
 └── main.py                 # FastAPI entry point
 tests/                     # Planner, controller, API, recovery, and verifier tests
 
@@ -118,7 +118,7 @@ tests/                     # Planner, controller, API, recovery, and verifier te
 
 ```bash
 git clone <repository-url>
-cd Agentic-AI-automator
+cd AURA
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -132,51 +132,62 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and add only the credentials required for the services you plan to use. `.env` is ignored by Git.
+Copy `.env.example` to `.env` only if you plan to use the optional Docker Compose setup or configure external services. Add only the credentials you need. `.env` is ignored by Git. The default rule-based planner can start without API keys.
 
-### Start the backend
-
-```bash
-uvicorn src.main:app --reload --port 8000
-```
-
-FastAPI documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
-
-### Start the UI
-
-In a second terminal:
+### Run the app locally
 
 ```bash
-export AURA_API_URL=http://127.0.0.1:8000
-streamlit run src/app_gui.py
+python -m uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Open [http://localhost:8501](http://localhost:8501).
+This single process serves both the FastAPI API and the browser UI. Open [http://localhost:8000](http://localhost:8000) for AURA, or [http://localhost:8000/docs](http://localhost:8000/docs) for the API documentation. There is no separate frontend server or npm install/build step.
 
-On Windows PowerShell:
+On Windows PowerShell, activate the virtual environment and run the existing helper:
 
 ```powershell
-$env:AURA_API_URL = "http://127.0.0.1:8000"
-streamlit run src/app_gui.py
+.\.venv\Scripts\Activate.ps1
+.\start_gui.ps1
 ```
+
+`start_gui.ps1` starts the same FastAPI app and expects its Python dependencies to be installed. Alternatively, `run_local.ps1` installs `requirements.txt` into the active Python environment and then starts AURA:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+.\run_local.ps1
+```
+
+### Run with Docker Compose
+
+The Compose configuration reads a root `.env` file. Create one from the example, then build and start the service:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+In PowerShell, use `Copy-Item .env.example .env` for the first step. The UI and API are available at [http://localhost:8000](http://localhost:8000). Stop the foreground service with `Ctrl+C`.
+
+### Deploy with Render
+
+The repository includes `render.yaml` and a Dockerfile for a Render Blueprint deployment. Create the service from the Blueprint, then add any optional API or SMTP credentials in the Render environment settings. The deployed service serves the UI and API from the same origin.
 
 ## Configuration
 
 | Variable | Purpose | Required |
 | --- | --- | --- |
-| `AURA_API_URL` | Backend URL used by the UI | No, defaults to `http://127.0.0.1:8000` |
 | `PLANNER_MODE` | `rule` or `llm` planner selection | No, defaults to `rule` |
 | `OPENAI_API_KEY` | LLM planning and analysis | Optional |
 | `SERPAPI_KEY` | Live web search | Optional |
-| `GOOGLE_API_KEY` | Google Custom Search | Optional |
-| `GOOGLE_CSE_ID` | Google Custom Search engine | Optional |
-| `SCRAPER_MODE` | `basic` or `playwright` scraping | Optional |
+| `GOOGLE_SEARCH_API_KEY` | Google Custom Search API key | Optional |
+| `GOOGLE_SEARCH_ENGINE_ID` | Google Custom Search engine ID | Optional |
+| `SCRAPER_MODE` | `requests` or `playwright` scraping; defaults to `requests` | Optional |
 | `SMTP_HOST` | SMTP server for email delivery | Optional |
 | `SMTP_PORT` | SMTP server port | Optional |
 | `SMTP_USER` | SMTP username | Optional |
 | `SMTP_PASSWORD` | SMTP password or app password | Optional |
 | `DEFAULT_FROM` | Default sender address | Optional |
 | `AURA_RUN_STORE` | Custom path for persisted run records | Optional |
+| `AURA_MEMORY_STORE` | Custom path for saved preferences and memory | Optional |
 
 When a live service is not configured, AURA reports fallback, simulation, or unavailable status rather than silently claiming live external data.
 
@@ -247,7 +258,7 @@ External integrations may operate in fallback or simulation mode. Verify the ser
 - Some search and analysis fallbacks are intentionally lightweight.
 - OCR requires system packages that are not installed by Python dependencies alone.
 - LLM planner comparison requires an OpenAI configuration and real benchmark runs.
-- Streamlit is designed for a local or small-team demonstration rather than high-concurrency production serving.
+- The browser workspace is served by the FastAPI process and is designed for a local or small-team demonstration.
 
 ## Roadmap
 

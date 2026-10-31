@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, Any
 from src.agent.planner import Planner as RulePlanner
@@ -229,6 +230,15 @@ async def set_preference(req: PreferenceRequest):
 async def clear_memory():
     memory.clear()
     return {"status": "ok", "message": "Memory reset"}
+
+
+# Serve the browser-native frontend from the same origin as the existing API.
+# API routes above keep their behavior; the static mount only handles UI assets.
+app.mount(
+    "/",
+    StaticFiles(directory=Path(__file__).resolve().parent.parent / "web", html=True),
+    name="aura-web",
+)
 
 
 if __name__ == "__main__":

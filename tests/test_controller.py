@@ -67,12 +67,11 @@ async def test_controller_dependency_skipping():
         mem = Memory(str(Path(td) / "mem.json"))
         controller = Controller(memory=mem)
 
-        # Tool that fails verification or execution
+        # Tool that fails verification or execution (empty scrape args with no search results in context)
         plan = {
             "input": "Failure test",
             "steps": [
-                # Search with empty query or invalid output
-                {"id": 1, "tool": "scrape", "args": {"url": "http://invalid-url-that-fails-999.xyz"}, "dependencies": []},
+                {"id": 1, "tool": "scrape", "args": {}, "dependencies": []},
                 {"id": 2, "tool": "logger", "args": {"message": "should be skipped"}, "dependencies": [1]},
             ],
         }
