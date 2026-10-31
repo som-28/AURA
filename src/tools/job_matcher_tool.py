@@ -43,8 +43,8 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     
     logs.append(f"Searching for: {search_query}")
     
-    # Use the enhanced search tool
-    from src.tools.search_tool_enhanced import run as search_run
+    # Use the search tool
+    from src.tools.search_tool import run as search_run
     
     limit = int(args.get("limit", 10))
     search_args = {"query": search_query, "limit": limit}

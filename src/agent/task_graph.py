@@ -1,4 +1,4 @@
-"""Dependency-aware ordering for execution plans."""
+"""Dependency-aware ordering and topological tiers for execution plans."""
 from __future__ import annotations
 
 from typing import Dict, List, Set
@@ -11,8 +11,9 @@ class TaskGraph:
         self.steps: Dict[str, PlanStep] = {str(step.id): step for step in steps}
         self._validate_acyclic()
 
-    def ordered_steps(self) -> List[PlanStep]:
-        ordered: List[PlanStep] = []
+    def execution_tiers(self) -> List[List[PlanStep]]:
+        """Group steps into topological tiers. Steps in the same tier can execute concurrently."""
+        tiers: List[List[PlanStep]] = []
         remaining = set(self.steps)
         completed: Set[str] = set()
 
@@ -25,10 +26,17 @@ class TaskGraph:
             if not ready:
                 raise ValueError("Task graph cannot resolve its dependencies")
             ready.sort(key=lambda step: str(step.id))
-            ordered.extend(ready)
+            tiers.append(ready)
             completed.update(str(step.id) for step in ready)
             remaining.difference_update(str(step.id) for step in ready)
 
+        return tiers
+
+    def ordered_steps(self) -> List[PlanStep]:
+        """Return a flat topological ordering of all steps."""
+        ordered: List[PlanStep] = []
+        for tier in self.execution_tiers():
+            ordered.extend(tier)
         return ordered
 
     def _validate_acyclic(self) -> None:
@@ -42,7 +50,9 @@ class TaskGraph:
                 return
             visiting.add(task_id)
             for dependency in self.steps[task_id].dependencies:
-                visit(str(dependency))
+                dep_key = str(dependency)
+                if dep_key in self.steps:
+                    visit(dep_key)
             visiting.remove(task_id)
             visited.add(task_id)
 

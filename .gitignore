@@ -56,7 +56,8 @@ tmp/
 *.log
 
 # Test files from root
-test_*.py
+/test_*.py
+!tests/test_*.py
 
 # User uploaded files
 *.pdf

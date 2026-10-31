@@ -202,8 +202,9 @@ def main():
                 if analysis.get("field_of_study"):
                     st.info(f"**Field:** {analysis['field_of_study']}")
                 
-                if analysis.get("experience_years"):
-                    st.info(f"**Experience:** {analysis['experience_years']} years")
+                exp_years = analysis.get("years_experience") or analysis.get("experience_years")
+                if exp_years:
+                    st.info(f"**Experience:** {exp_years}" if "year" in str(exp_years).lower() else f"**Experience:** {exp_years} years")
                 
                 if analysis.get("skills"):
                     st.markdown("**Skills:**")

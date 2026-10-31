@@ -9,22 +9,30 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from src.agent.planner import Planner as RulePlanner
 from src.agent.planner_llm import LLMPlanner
 from src.agent.controller import Controller
 from src.agent.evaluator import evaluate_runs
 from src.agent.run_store import RunStore
+from src.agent.memory import Memory
 from src.utils.config import load_config
 
 app = FastAPI(title="AURA Autonomous Task Agent")
 
 cfg = load_config()
+# Shared memory store for preferences and long-term state
+memory = Memory()
 # Use LLM planner if configured, else rule-based
 planner_mode = os.getenv("PLANNER_MODE", "rule")
-planner = LLMPlanner(cfg) if planner_mode == "llm" else RulePlanner(cfg)
-controller = Controller(cfg)
+planner = LLMPlanner(cfg, memory=memory) if planner_mode == "llm" else RulePlanner(cfg, memory=memory)
+controller = Controller(cfg, memory=memory)
 run_store = RunStore()
+
+
+class PreferenceRequest(BaseModel):
+    key: str
+    value: Any
 
 
 class RunRequest(BaseModel):
@@ -141,12 +149,12 @@ async def run_task(req: RunRequest):
     try:
         active_planner = planner
         if req.planner == "rule":
-            active_planner = RulePlanner(cfg)
+            active_planner = RulePlanner(cfg, memory=memory)
         elif req.planner == "llm":
-            active_planner = LLMPlanner(cfg)
+            active_planner = LLMPlanner(cfg, memory=memory)
 
         plan = active_planner.plan(goal, target_email=req.email)
-        logs = await controller.execute_plan(plan)
+        logs = await controller.execute_plan(plan, run_id=run_id)
         events = serialize_events(controller.get_events())
         status = run_status(events)
         record = {
@@ -204,6 +212,23 @@ async def metrics():
 @app.get("/evaluation")
 async def evaluation():
     return evaluate_runs(run_store.list())
+
+
+@app.get("/memory")
+async def get_memory():
+    return memory.to_dict()
+
+
+@app.post("/memory/preference")
+async def set_preference(req: PreferenceRequest):
+    memory.set_preference(req.key, req.value)
+    return {"status": "ok", "key": req.key, "value": req.value}
+
+
+@app.delete("/memory")
+async def clear_memory():
+    memory.clear()
+    return {"status": "ok", "message": "Memory reset"}
 
 
 if __name__ == "__main__":
