@@ -3,15 +3,11 @@ from typing import Tuple, List
 import os
 import re
 
-try:
-    import openai
-except Exception:
-    openai = None
-
 
 def _simple_extractive(text: str, max_sentences: int = 5) -> str:
     # naive sentence split
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
     return "\n- " + "\n- ".join(sentences[:max_sentences])
 
 
@@ -34,14 +30,16 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
         logs.append("No content found to summarise")
         return logs, {"summary": "(no content)"}
 
-    # If OpenAI is configured, call completion
-    if openai and os.getenv("OPENAI_API_KEY"):
+    # If OpenAI is configured, call completion using modern v1+ client
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
         try:
-            openai.api_key = os.getenv("OPENAI_API_KEY")
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
             prompt = f"Summarize the following text in {max_sentences} bullets:\n\n{joined[:3000]}"
-            resp = openai.ChatCompletion.create(
-                model="gpt-4o-mini" if True else "gpt-4",
-                messages=[{"role":"user","content":prompt}],
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=400,
             )
             summary = resp.choices[0].message.content.strip()

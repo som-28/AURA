@@ -1,74 +1,102 @@
 """Planner: convert natural language tasks into a JSON execution plan.
 
-This planner is rule-based for offline demo use. If an OpenAI key is provided,
-it will optionally call the LLM to improve plans.
+This planner is rule-based for offline deterministic use. If an OpenAI key
+is provided, LLMPlanner can optionally be used instead.
 """
 from __future__ import annotations
 import re
-import os
-import json
+from typing import Optional
 from src.utils.config import load_config
+from src.agent.memory import Memory
 
 
 class Planner:
-    def __init__(self, cfg=None):
+    def __init__(self, cfg=None, memory: Optional[Memory] = None):
         self.cfg = cfg or load_config()
+        self.memory = memory or Memory()
 
     def plan(self, command: str, target_email: str | None = None) -> dict:
-        """Produce a JSON plan with ordered steps.
-
-        Sample plan structure:
-        {
-            "input": "...",
-            "steps": [
-                {"id": 1, "tool": "search", "args": {...}},
-                {"id": 2, "tool": "scrape", "args": {...}},
-                {"id": 3, "tool": "summarize", "args": {...}},
-                {"id": 4, "tool": "email", "args": {...}}
-            ]
-        }
-        """
+        """Produce a JSON plan with ordered steps and explicit dependencies."""
         cmd = command.lower()
         steps = []
         sid = 1
+        last_step_id = None
 
-        # detect 'search' intent
+        # Resolve email: explicit arg > memory preference > empty
+        resolved_email = (
+            target_email
+            or self.memory.get_preference("default_email")
+            or self.memory.get_preference("email")
+            or ""
+        )
+
+        # 1. detect 'search' intent
         if any(k in cmd for k in ["find", "search", "look for", "top", "list"]):
-            # determine query phrase
             q = self._extract_search_query(command)
-            steps.append({"id": sid, "tool": "search", "args": {"query": q, "limit": 5}})
+            steps.append({
+                "id": sid,
+                "tool": "search",
+                "args": {"query": q, "limit": 5},
+                "dependencies": [],
+            })
+            last_step_id = sid
             sid += 1
 
-        # detect 'scrape' or need to open links
+        # 2. detect 'scrape' intent
         if any(k in cmd for k in ["scrape", "details", "summarize", "summary", "compare"]) or "internship" in cmd or "course" in cmd:
-            # Add a scraping step to fetch details from search results
-            steps.append({"id": sid, "tool": "scrape", "args": {"top_k": 3}})
+            deps = [last_step_id] if last_step_id else []
+            steps.append({
+                "id": sid,
+                "tool": "scrape",
+                "args": {"top_k": 3},
+                "dependencies": deps,
+            })
+            last_step_id = sid
             sid += 1
 
-        # detect summarization
+        # 3. detect summarization
         if any(k in cmd for k in ["summarize", "summary", "bullet", "compare", "comparison"]):
-            steps.append({"id": sid, "tool": "summarize", "args": {"mode": "bullet", "max_sentences": 8}})
+            deps = [last_step_id] if last_step_id else []
+            steps.append({
+                "id": sid,
+                "tool": "summarize",
+                "args": {"mode": "bullet", "max_sentences": 8},
+                "dependencies": deps,
+            })
+            last_step_id = sid
             sid += 1
 
-        # email
-        if target_email or "email" in cmd or "send" in cmd:
-            steps.append({"id": sid, "tool": "email", "args": {"to": target_email or "", "subject": f"Automation result for: {command}"}})
+        # 4. email
+        if resolved_email or "email" in cmd or "send" in cmd:
+            deps = [last_step_id] if last_step_id else []
+            steps.append({
+                "id": sid,
+                "tool": "email",
+                "args": {
+                    "to": resolved_email,
+                    "subject": f"Automation result for: {command}",
+                },
+                "dependencies": deps,
+            })
+            last_step_id = sid
             sid += 1
 
-        # always log
-        steps.append({"id": sid, "tool": "logger", "args": {"message": f"Completed task: {command}"}})
+        # 5. always log completion
+        deps = [last_step_id] if last_step_id else []
+        steps.append({
+            "id": sid,
+            "tool": "logger",
+            "args": {"message": f"Completed task: {command}"},
+            "dependencies": deps,
+        })
 
         plan = {"input": command, "steps": steps}
-
         return plan
 
     def _extract_search_query(self, command: str) -> str:
-        # Very simple heuristics for common queries
-        # For example: "Find me top 5 internships in Bangalore" -> "top internships in Bangalore"
         patterns = [r"find me (.+)", r"search for (.+)", r"look for (.+)", r"find (.+)"]
         for p in patterns:
             m = re.search(p, command, re.IGNORECASE)
             if m:
-                return m.group(1)
-        # fallback: whole command
-        return command
+                return m.group(1).strip()
+        return command.strip()

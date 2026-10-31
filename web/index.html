@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#eaf0f8" />
+  <meta name="description" content="AURA — your thoughtful AI workspace." />
+  <title>AURA — AI Workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Silkscreen:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script>try { if (localStorage.getItem('aura-theme') !== 'light') document.documentElement.classList.add('dark-mode'); } catch { document.documentElement.classList.add('dark-mode'); }</script>
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="ambient ambient-three"></div>
+  <canvas class="sky-canvas" id="sky-canvas" aria-hidden="true"></canvas>
+  <div class="app-shell">
+    <div class="workspace">
+      <main class="main-content" id="main-content">
+        <div class="dashboard-masthead">
+          <a class="brand" href="#home" aria-label="AURA home">
+            <span class="brand-mark">A</span><span class="brand-name">aura<span class="brand-slash">/</span>workspace</span>
+          </a>
+          <nav class="paper-nav" aria-label="Primary navigation">
+            <button class="nav-item active" type="button" data-page="home">00 <span>workspace</span></button>
+            <button class="nav-item" type="button" data-page="journeys">01 <span>journeys</span></button>
+            <button class="nav-item" type="button" data-page="talent">02 <span>talent</span></button>
+            <button class="nav-item" type="button" data-page="capabilities">03 <span>tools</span></button>
+            <button class="nav-item" type="button" data-page="insights">04 <span>insights</span></button>
+          </nav>
+          <div class="masthead-actions">
+            <span class="connection"><i class="connection-dot"></i><span id="connection-label">Connecting</span></span>
+            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode"><span class="theme-mode-label">LIGHT MODE</span><span class="theme-toggle-glyph" aria-hidden="true">◐</span></button>
+          </div>
+        </div>
+        <section class="page active" id="page-home" data-page="home">
+          <div class="home-grid">
+            <div class="home-main">
+              <div class="eyebrow"><span class="eyebrow-line"></span><span>$ &nbsp; aura / new journey</span></div>
+              <h1>What can I help<br class="desktop-break" /> you move forward?</h1>
+              <p class="hero-copy">Give AURA a goal. It will plan the work, carry it through, and show you what happened.</p>
+
+              <form class="composer glass-panel" id="run-form">
+                <label class="sr-only" for="goal-input">Describe your goal</label>
+                <textarea id="goal-input" placeholder="Describe what you want to accomplish…" rows="4" required></textarea>
+                <div class="composer-footer">
+                  <div class="composer-options">
+                    <div class="select-wrap planner-picker" id="planner-picker">
+                      <span class="option-icon" data-icon="route"></span>
+                      <select id="planner-select" aria-label="Planning strategy" tabindex="-1" aria-hidden="true"><option value="rule">Rule-based planning</option><option value="llm">Autonomous AI planning</option></select>
+                      <button class="planner-trigger" id="planner-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="planner-menu"><span id="planner-current">Rule-based planning</span><span class="chevron" data-icon="chevron"></span></button>
+                      <div class="planner-menu" id="planner-menu" role="listbox" aria-label="Planning strategy" hidden>
+                        <button class="planner-option selected" type="button" role="option" aria-selected="true" data-value="rule"><span class="planner-option-title">Rule-based planning</span><span class="planner-option-note">Predictable, local execution</span><span class="planner-check" aria-hidden="true">✓</span></button>
+                        <button class="planner-option" type="button" role="option" aria-selected="false" data-value="llm"><span class="planner-option-title">Autonomous AI planning</span><span class="planner-option-note">Flexible planning with AI</span><span class="planner-check" aria-hidden="true">✓</span></button>
+                      </div>
+                    </div>
+                    <label class="email-wrap"><span class="option-icon" data-icon="mail"></span><input id="email-input" type="email" placeholder="Email results (optional)" aria-label="Recipient email" /></label>
+                  </div>
+                  <button class="button-primary" id="run-button" type="submit"><span>Start a journey</span><span class="button-arrow" data-icon="arrow"></span></button>
+                </div>
+              </form>
+
+              <div class="suggestions"><span class="suggestions-label">Popular ways to start</span>
+                <button class="suggestion" data-prompt="Find remote Python developer internships in India, extract required skills, match with my profile, and email a summary to me"><span class="suggestion-top"><span class="suggestion-icon" data-icon="briefcase"></span><span class="suggestion-arrow" data-icon="arrow-up-right"></span></span><span class="suggestion-copy"><strong>Find internships</strong><small>Shortlist roles that fit your skills</small></span></button>
+                <button class="suggestion" data-prompt="Search for open-source LLM agent frameworks, summarize their architecture, and compile the key differences"><span class="suggestion-top"><span class="suggestion-icon" data-icon="orbit"></span><span class="suggestion-arrow" data-icon="arrow-up-right"></span></span><span class="suggestion-copy"><strong>Explore AI frameworks</strong><small>Compare tools and architectures</small></span></button>
+                <button class="suggestion" data-prompt="Audit my resume, evaluate skill coverage against Senior Python roles, and identify the most important gaps"><span class="suggestion-top"><span class="suggestion-icon" data-icon="doc"></span><span class="suggestion-arrow" data-icon="arrow-up-right"></span></span><span class="suggestion-copy"><strong>Review a resume</strong><small>Find skill gaps and next steps</small></span></button>
+              </div>
+
+              <div class="run-result hidden" id="run-result" aria-live="polite"></div>
+            </div>
+
+            <aside class="home-aside">
+              <div class="section-heading"><div><span class="section-kicker">AT A GLANCE</span><h2>Your workspace</h2></div><span class="live-indicator"><i></i>Live</span></div>
+              <div class="overview-card glass-panel">
+                <div class="overview-top"><span class="overview-icon" data-icon="spark"></span><span class="overview-label">EXECUTION OVERVIEW</span></div>
+                <div class="overview-metrics"><div><strong id="home-runs">—</strong><span>Journeys</span></div><div><strong id="home-success">—</strong><span>Success rate</span></div></div>
+                <div class="overview-foot"><span class="overview-foot-dot"></span><span id="overview-foot-text">Checking your workspace</span><button data-navigate="insights" aria-label="View insights" data-icon="arrow-up-right"></button></div>
+              </div>
+              <div class="recent-card glass-panel">
+                <div class="card-heading"><h3>Recent journeys</h3><button class="text-link" data-navigate="journeys">See all <span data-icon="arrow-right"></span></button></div>
+                <div id="recent-list" class="recent-list"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
+              </div>
+              <div class="quiet-note"><span data-icon="spark-small"></span><span>AURA verifies each step and keeps a clear record of the work.</span></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="page-journeys" data-page="journeys">
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>01 / RUN HISTORY</span></div><h1>Past journeys</h1><p>Every goal, step, and outcome—kept together in one clear history.</p></div>
+          <div class="toolbar glass-panel"><label class="search-box"><span data-icon="search"></span><input id="journey-search" placeholder="Search journeys" /></label><span class="toolbar-count" id="journeys-total">Loading history…</span></div>
+          <div class="journey-list" id="journey-list"></div>
+        </section>
+
+        <section class="page" id="page-talent" data-page="talent">
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>02 / TALENT</span></div><h1>Talent dossier</h1><p>Understand a candidate profile and find roles that fit.</p></div>
+          <div class="talent-grid">
+            <div class="upload-card glass-panel"><div class="panel-heading"><span class="panel-icon blue" data-icon="upload"></span><div><h2>Resume</h2><p>PDF, DOCX, or TXT · up to 10 MB</p></div></div>
+              <label class="dropzone" id="dropzone"><input type="file" id="resume-file" accept=".pdf,.docx,.txt" /><span class="upload-symbol" data-icon="upload"></span><strong id="upload-title">Choose a file or drop it here</strong><span id="upload-caption">Your document is processed by AURA.</span></label>
+              <button class="button-primary full-width" id="analyze-button" disabled><span>Analyze resume</span><span class="button-arrow" data-icon="arrow"></span></button>
+            </div>
+            <div class="profile-card glass-panel"><div class="panel-heading"><span class="panel-icon violet" data-icon="person"></span><div><h2>Candidate profile</h2><p>Skills, experience, and role matches</p></div></div><div id="profile-content" class="empty-profile"><span class="empty-art" data-icon="doc"></span><strong>No profile yet</strong><span>Upload a resume and AURA will organize the details here.</span></div></div>
+          </div>
+          <div class="matches-section hidden" id="matches-section"><div class="section-heading"><div><span class="section-kicker">CURATED FOR THIS PROFILE</span><h2>Matching roles</h2></div><div class="match-controls"><input id="location-input" value="remote" aria-label="Location preference" /><button class="button-secondary" id="match-button">Find roles <span data-icon="arrow-right"></span></button></div></div><div id="matches-list" class="matches-grid"></div></div>
+        </section>
+
+        <section class="page" id="page-capabilities" data-page="capabilities">
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>03 / CAPABILITIES</span></div><h1>Capabilities</h1><p>Tools AURA can bring into a journey, with clear limits and retries.</p></div>
+          <div class="capability-summary glass-panel"><span class="summary-icon" data-icon="grid"></span><div><strong id="capability-count">—</strong><span>registered capabilities</span></div><span class="summary-divider"></span><span class="summary-copy">Each tool is checked and verified as part of your workflow.</span></div>
+          <div class="capability-grid" id="capability-list"></div>
+        </section>
+
+        <section class="page" id="page-insights" data-page="insights">
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>04 / INSIGHTS</span></div><h1>Insights</h1><p>A clear picture of how AURA is working across your journeys.</p></div>
+          <div class="insight-metrics" id="insight-metrics"></div>
+          <div class="insights-grid"><div class="insight-panel glass-panel"><div class="card-heading"><div><span class="section-kicker">PLANNING</span><h2>Planner performance</h2></div></div><div id="planner-breakdown" class="breakdown-list"></div></div><div class="insight-panel glass-panel"><div class="card-heading"><div><span class="section-kicker">RELIABILITY</span><h2>Fault classifications</h2></div></div><div id="fault-breakdown" class="breakdown-list"></div></div></div>
+          <div class="memory-panel glass-panel"><div class="section-heading"><div><span class="section-kicker">PERSONAL CONTEXT</span><h2>Memory archive</h2></div><button id="memory-refresh" class="icon-button" aria-label="Refresh memory" data-icon="refresh"></button></div><div class="memory-grid"><div id="memory-content" class="memory-content"></div><form id="preference-form" class="preference-form"><label>Preference name<input id="preference-key" placeholder="e.g. target_role" required /></label><label>Value<input id="preference-value" placeholder="e.g. Python engineer" required /></label><button class="button-secondary" type="submit">Save preference <span data-icon="arrow-right"></span></button><button class="reset-link" type="button" id="memory-reset">Reset memory</button></form></div></div>
+        </section>
+      </main>
+    </div>
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
