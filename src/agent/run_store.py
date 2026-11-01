@@ -54,10 +54,12 @@ class RunStore:
     def metrics(self) -> dict:
         records = self.list()
         completed = sum(record.get("status") == "completed" for record in records)
+        partial = sum(record.get("status") == "partial" for record in records)
         failed = sum(record.get("status") == "failed" for record in records)
         return {
             "total_runs": len(records),
             "completed_runs": completed,
+            "partial_runs": partial,
             "failed_runs": failed,
             "success_rate": completed / len(records) if records else 0.0,
         }

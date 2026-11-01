@@ -31,15 +31,22 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     interests = analysis.get("career_interests", [])
     keywords = analysis.get("job_keywords", [])
     
-    # Combine into search query
+    # Prefer role intent over degree names, then add a couple of skills.
     search_terms = []
-    if field:
+    search_terms.extend(interests[:2])
+    if not search_terms:
+        search_terms.extend(keywords[:2])
+    if not search_terms and field:
         search_terms.append(field)
-    search_terms.extend(skills[:3])  # Top 3 skills
-    search_terms.extend(keywords[:2])  # Top 2 keywords
+    search_terms.extend(skills[:2])
+    deduped_terms = []
+    for term in search_terms:
+        term = str(term).strip()
+        if term and term.casefold() not in {item.casefold() for item in deduped_terms}:
+            deduped_terms.append(term)
     
     location = args.get("location", "remote")
-    search_query = f"{' '.join(search_terms[:5])} jobs {location}"
+    search_query = f"{' '.join(deduped_terms[:4])} jobs {location}".strip()
     
     logs.append(f"Searching for: {search_query}")
     
@@ -51,6 +58,15 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     search_logs, search_output = search_run(search_args, context)
     
     logs.extend(search_logs)
+
+    if not search_output.get("search_available", True):
+        return logs, {
+            "job_matches": [],
+            "search_query": search_query,
+            "matched_field": field,
+            "matched_skills": skills[:5],
+            "message": search_output.get("message", "Live job search is unavailable."),
+        }
     
     job_results = search_output.get("results", [])
     
@@ -68,7 +84,16 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
             "title": result.get("title"),
             "url": result.get("url"),
             "snippet": result.get("snippet"),
-            "relevance": "high" if is_job else "medium",
+            "source": result.get("source"),
+            "provider": result.get("provider"),
+            "found_at": result.get("found_at"),
+            "published_at": result.get("published_at"),
+            "company": result.get("company"),
+            "location": result.get("location"),
+            "work_mode": result.get("work_mode"),
+            "salary": result.get("salary"),
+            "employment_type": result.get("employment_type"),
+            "relevance": result.get("relevance") or ("Strong match" if is_job else "Related"),
             "matched_skills": [skill for skill in skills if skill.lower() in snippet_lower]
         })
     

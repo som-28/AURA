@@ -9,10 +9,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Silkscreen:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=aura-empty-state-fix-1" />
   <script>try { if (localStorage.getItem('aura-theme') !== 'light') document.documentElement.classList.add('dark-mode'); } catch { document.documentElement.classList.add('dark-mode'); }</script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="ambient ambient-three"></div>
   <canvas class="sky-canvas" id="sky-canvas" aria-hidden="true"></canvas>
   <div class="app-shell">
@@ -48,11 +49,11 @@
                   <div class="composer-options">
                     <div class="select-wrap planner-picker" id="planner-picker">
                       <span class="option-icon" data-icon="route"></span>
-                      <select id="planner-select" aria-label="Planning strategy" tabindex="-1" aria-hidden="true"><option value="rule">Rule-based planning</option><option value="llm">Autonomous AI planning</option></select>
-                      <button class="planner-trigger" id="planner-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="planner-menu"><span id="planner-current">Rule-based planning</span><span class="chevron" data-icon="chevron"></span></button>
+                      <select id="planner-select" aria-label="Planning strategy" tabindex="-1" aria-hidden="true"><option value="rule">Rule-based planning</option><option value="llm" selected>Autonomous AI planning</option></select>
+                      <button class="planner-trigger" id="planner-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="planner-menu"><span id="planner-current">Autonomous AI planning</span><span class="chevron" data-icon="chevron"></span></button>
                       <div class="planner-menu" id="planner-menu" role="listbox" aria-label="Planning strategy" hidden>
-                        <button class="planner-option selected" type="button" role="option" aria-selected="true" data-value="rule"><span class="planner-option-title">Rule-based planning</span><span class="planner-option-note">Predictable, local execution</span><span class="planner-check" aria-hidden="true">✓</span></button>
-                        <button class="planner-option" type="button" role="option" aria-selected="false" data-value="llm"><span class="planner-option-title">Autonomous AI planning</span><span class="planner-option-note">Flexible planning with AI</span><span class="planner-check" aria-hidden="true">✓</span></button>
+                        <button class="planner-option" type="button" role="option" aria-selected="false" data-value="rule"><span class="planner-option-title">Rule-based planning</span><span class="planner-option-note">Predictable, local execution</span><span class="planner-check" aria-hidden="true">✓</span></button>
+                        <button class="planner-option selected" type="button" role="option" aria-selected="true" data-value="llm"><span class="planner-option-title">Autonomous AI planning</span><span class="planner-option-note">Local Qwen via Ollama</span><span class="planner-check" aria-hidden="true">✓</span></button>
                       </div>
                     </div>
                     <label class="email-wrap"><span class="option-icon" data-icon="mail"></span><input id="email-input" type="email" placeholder="Email results (optional)" aria-label="Recipient email" /></label>
@@ -67,7 +68,8 @@
                 <button class="suggestion" data-prompt="Audit my resume, evaluate skill coverage against Senior Python roles, and identify the most important gaps"><span class="suggestion-top"><span class="suggestion-icon" data-icon="doc"></span><span class="suggestion-arrow" data-icon="arrow-up-right"></span></span><span class="suggestion-copy"><strong>Review a resume</strong><small>Find skill gaps and next steps</small></span></button>
               </div>
 
-              <div class="run-result hidden" id="run-result" aria-live="polite"></div>
+              <p class="sr-only" id="run-live-status" role="status" aria-live="polite" aria-atomic="true"></p>
+              <div class="run-result hidden" id="run-result" role="region" aria-label="Journey results"></div>
             </div>
 
             <aside class="home-aside">
@@ -88,7 +90,18 @@
 
         <section class="page" id="page-journeys" data-page="journeys">
           <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>01 / RUN HISTORY</span></div><h1>Past journeys</h1><p>Every goal, step, and outcome—kept together in one clear history.</p></div>
-          <div class="toolbar glass-panel"><label class="search-box"><span data-icon="search"></span><input id="journey-search" placeholder="Search journeys" /></label><span class="toolbar-count" id="journeys-total">Loading history…</span></div>
+          <div class="toolbar glass-panel">
+            <label class="search-box"><span data-icon="search"></span><input id="journey-search" type="search" placeholder="Search journeys" aria-label="Search journeys" /></label>
+            <div class="journey-filters">
+              <label class="sr-only" for="journey-status-filter">Filter by status</label>
+              <select id="journey-status-filter" aria-label="Filter by status"><option value="all">All statuses</option><option value="completed">Completed</option><option value="partial">Partially complete</option><option value="failed">Failed</option></select>
+              <label class="sr-only" for="journey-date-filter">Filter by date</label>
+              <select id="journey-date-filter" aria-label="Filter by date"><option value="all">Any time</option><option value="today">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
+              <label class="sr-only" for="journey-sort">Sort journeys</label>
+              <select id="journey-sort" aria-label="Sort journeys"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+            </div>
+            <span class="toolbar-count" id="journeys-total" aria-live="polite">Loading history…</span>
+          </div>
           <div class="journey-list" id="journey-list"></div>
         </section>
 
@@ -120,6 +133,6 @@
     </div>
     <div class="toast-region" id="toast-region" aria-live="polite"></div>
   </div>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=aura-empty-state-fix-1" defer></script>
 </body>
 </html>

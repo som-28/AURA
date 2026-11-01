@@ -10,6 +10,7 @@ def evaluate_runs(records: Iterable[dict]) -> dict:
     runs = list(records)
     total = len(runs)
     completed = sum(record.get("status") == "completed" for record in runs)
+    partial = sum(record.get("status") == "partial" for record in runs)
     failed = sum(record.get("status") == "failed" for record in runs)
     task_counts = [record.get("tasks_completed", 0) for record in runs]
     verified_counts = [record.get("verification_events", 0) for record in runs]
@@ -26,6 +27,7 @@ def evaluate_runs(records: Iterable[dict]) -> dict:
     for planner, planner_records in planner_runs.items():
         planner_comparison[planner] = {
             "runs": len(planner_records),
+            "partial_runs": sum(record.get("status") == "partial" for record in planner_records),
             "success_rate": sum(
                 record.get("status") == "completed" for record in planner_records
             ) / len(planner_records),
@@ -34,6 +36,7 @@ def evaluate_runs(records: Iterable[dict]) -> dict:
     return {
         "total_runs": total,
         "completed_runs": completed,
+        "partial_runs": partial,
         "failed_runs": failed,
         "success_rate": completed / total if total else 0.0,
         "recovery_rate": sum(count > 0 for count in recovery_counts) / total if total else 0.0,

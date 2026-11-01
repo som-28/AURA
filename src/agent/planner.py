@@ -8,6 +8,7 @@ import re
 from typing import Optional
 from src.utils.config import load_config
 from src.agent.memory import Memory
+from src.utils.email_utils import usable_recipient
 
 
 class Planner:
@@ -23,12 +24,14 @@ class Planner:
         last_step_id = None
 
         # Resolve email: explicit arg > memory preference > empty
-        resolved_email = (
-            target_email
-            or self.memory.get_preference("default_email")
-            or self.memory.get_preference("email")
-            or ""
-        )
+        if target_email:
+            resolved_email = usable_recipient(target_email) or ""
+        else:
+            resolved_email = (
+                usable_recipient(self.memory.get_preference("default_email"))
+                or usable_recipient(self.memory.get_preference("email"))
+                or ""
+            )
 
         # 1. detect 'search' intent
         if any(k in cmd for k in ["find", "search", "look for", "top", "list"]):
@@ -67,7 +70,7 @@ class Planner:
             sid += 1
 
         # 4. email
-        if resolved_email or "email" in cmd or "send" in cmd:
+        if resolved_email:
             deps = [last_step_id] if last_step_id else []
             steps.append({
                 "id": sid,

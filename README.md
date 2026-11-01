@@ -21,7 +21,7 @@ User goal
 ### Goal execution
 
 - Rule-based planning for deterministic offline operation.
-- Optional OpenAI-assisted planning when configured.
+- Optional local Ollama/Qwen or hosted OpenAI-assisted planning.
 - Typed plan validation before execution.
 - Registered tools only: unknown or unsafe tool names are rejected.
 - Dependency-aware task ordering.
@@ -29,7 +29,7 @@ User goal
 
 ### Available capabilities
 
-- Web search with live or explicitly configured fallback behavior.
+- Live web search when a search provider is configured; reports unavailable instead of showing fake results when no key is set.
 - Web scraping through requests or Playwright modes.
 - Content summarization.
 - Email sending or clearly labelled simulation when SMTP is unavailable.
@@ -48,6 +48,13 @@ The browser-native workspace provides:
 - Registered Capabilities with risk and retry metadata.
 - Insights calculated from persisted runs.
 - Live task events, verification, and recovery details.
+- Search result provenance, search timestamps, and an on-demand public-link check that flags confirmed missing pages.
+- Journey history search, status/date filters, and newest/oldest sorting.
+- Live journey progress streaming, per-step timings, and a process-cached LLM client.
+- Fast extractive summaries by default; set `SUMMARY_MODE=llm` to use the configured model for summaries.
+- Clear complete, partial, and failed run states, with human-readable plan and event details.
+- Screen-reader announcements, keyboard focus treatment, and responsive filter/result layouts.
+- Email summaries built from the same captured summary and ordered links shown in the workspace.
 
 The interface is built with HTML, CSS, and JavaScript as a responsive, page-based workspace. It uses an understated graph-paper backdrop, inline numbered navigation, a dark/light theme switch, Space Grotesk headings, and IBM Plex Mono labels. Most sections sit directly on the canvas; the goal composer and resume uploader remain framed as task controls. The frontend has no separate Node, npm, or build-server requirement and calls the existing FastAPI endpoints.
 
@@ -93,7 +100,7 @@ src/
 │   ├── evaluator.py        # Metrics from persisted runs
 │   ├── models.py           # Typed plans, tasks, events, and results
 │   ├── planner.py          # Deterministic planner
-│   ├── planner_llm.py      # Optional OpenAI planner
+│   ├── planner_llm.py      # Optional Ollama/OpenAI planner
 │   ├── recovery.py         # Failure classification and retry policy
 │   ├── run_store.py        # Atomic JSON execution history
 │   ├── task_graph.py       # Dependency ordering and cycle checks
@@ -110,7 +117,8 @@ tests/                     # Planner, controller, API, recovery, and verifier te
 ### Requirements
 
 - Python 3.10 or newer.
-- Optional API credentials for live OpenAI, SerpAPI, Google Search, or SMTP features.
+- Ollama running locally for private, key-free Qwen planning and analysis; hosted OpenAI is optional.
+- Optional API credentials for live search or SMTP features.
 - Optional Playwright browser installation for JavaScript-heavy pages.
 - Optional Tesseract and Poppler installations for scanned PDF OCR.
 
@@ -132,7 +140,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` only if you plan to use the optional Docker Compose setup or configure external services. Add only the credentials you need. `.env` is ignored by Git. The default rule-based planner can start without API keys.
+Copy `.env.example` to `.env` for local Qwen mode. Ollama must be running on this computer at `http://127.0.0.1:11434`. `.env` is ignored by Git, and local Qwen does not need an API key. Set `PLANNER_MODE=rule` if you want deterministic planning instead.
 
 ### Run the app locally
 
@@ -141,6 +149,8 @@ python -m uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 This single process serves both the FastAPI API and the browser UI. Open [http://localhost:8000](http://localhost:8000) for AURA, or [http://localhost:8000/docs](http://localhost:8000/docs) for the API documentation. There is no separate frontend server or npm install/build step.
+
+For faster repeated local-model requests, AURA reuses its configured model client and avoids a second model call for summaries by default. The Ollama daemon controls how long a model stays loaded; set `OLLAMA_KEEP_ALIVE=30m` in the Ollama systemd service environment if you want it to remain warm longer than its current setting. This belongs to the Ollama service, not AURA's `.env`.
 
 On Windows PowerShell, activate the virtual environment and run the existing helper:
 
@@ -175,8 +185,13 @@ The repository includes `render.yaml` and a Dockerfile for a Render Blueprint de
 
 | Variable | Purpose | Required |
 | --- | --- | --- |
-| `PLANNER_MODE` | `rule` or `llm` planner selection | No, defaults to `rule` |
-| `OPENAI_API_KEY` | LLM planning and analysis | Optional |
+| `PLANNER_MODE` | `rule` or `llm` planner selection | Defaults to `llm` in `.env.example` |
+| `LLM_PROVIDER` | `ollama` or `openai` | Defaults to local Ollama in `.env.example` |
+| `OLLAMA_BASE_URL` | Ollama OpenAI-compatible endpoint | Defaults to `http://127.0.0.1:11434/v1` |
+| `OLLAMA_MODEL` | Local model name | Defaults to `qwen2.5:3b` |
+| `LLM_REQUEST_TIMEOUT` | Timeout in seconds for model requests | Defaults to `120` |
+| `SUMMARY_MODE` | `extractive` or `llm` | Defaults to fast local extractive summaries |
+| `OPENAI_API_KEY` | Optional hosted OpenAI key when `LLM_PROVIDER=openai` | Optional |
 | `SERPAPI_KEY` | Live web search | Optional |
 | `GOOGLE_SEARCH_API_KEY` | Google Custom Search API key | Optional |
 | `GOOGLE_SEARCH_ENGINE_ID` | Google Custom Search engine ID | Optional |
@@ -185,7 +200,7 @@ The repository includes `render.yaml` and a Dockerfile for a Render Blueprint de
 | `SMTP_PORT` | SMTP server port | Optional |
 | `SMTP_USER` | SMTP username | Optional |
 | `SMTP_PASSWORD` | SMTP password or app password | Optional |
-| `DEFAULT_FROM` | Default sender address | Optional |
+| `SMTP_FROM` | Verified sender address used in the From header | Optional; falls back to `DEFAULT_FROM`, then `SMTP_USER` |
 | `AURA_RUN_STORE` | Custom path for persisted run records | Optional |
 | `AURA_MEMORY_STORE` | Custom path for saved preferences and memory | Optional |
 
@@ -202,6 +217,21 @@ GET /metrics
 GET /evaluation
 ```
 
+### Check result links
+
+```http
+POST /links/check
+Content-Type: application/json
+```
+
+```json
+{
+  "urls": ["https://example.org/jobs/role"]
+}
+```
+
+Checks up to 15 public HTTP(S) URLs without following redirects or reading page content. Only confirmed `404` and `410` responses are flagged as broken; blocked or unavailable checks remain unverified.
+
 ### Run a goal
 
 ```http
@@ -215,6 +245,8 @@ Content-Type: application/json
   "planner": "rule"
 }
 ```
+
+The browser uses `POST /run/stream` for server-sent progress events and a final result event. Existing API clients can continue using `POST /run` for a single JSON response.
 
 The response includes a `run_id`, final status, validated plan, logs, structured events, task counts, and verification counts.
 
@@ -257,7 +289,7 @@ External integrations may operate in fallback or simulation mode. Verify the ser
 - The default run store is a local JSON file rather than a multi-user database.
 - Some search and analysis fallbacks are intentionally lightweight.
 - OCR requires system packages that are not installed by Python dependencies alone.
-- LLM planner comparison requires an OpenAI configuration and real benchmark runs.
+- LLM planner comparison requires a configured Ollama or OpenAI provider and real benchmark runs.
 - The browser workspace is served by the FastAPI process and is designed for a local or small-team demonstration.
 
 ## Roadmap

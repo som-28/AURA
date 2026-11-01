@@ -1,16 +1,15 @@
-"""LLM-based planner using OpenAI to decompose complex tasks.
-
-Falls back to rule-based planning if no OpenAI key is configured.
-"""
+"""LLM-based planner with local Ollama and optional hosted OpenAI support."""
 from __future__ import annotations
 import os
 import json
 from typing import Optional
 from src.utils.config import load_config
 from src.agent.memory import Memory
+from src.utils.llm_client import get_llm_client
 
 # Import the rule-based planner logic
 from src.agent.planner import Planner as RulePlanner
+from src.utils.email_utils import usable_recipient
 
 
 class LLMPlanner:
@@ -23,23 +22,26 @@ class LLMPlanner:
         """Generate plan using LLM if available, else rule-based."""
         planner_mode = os.getenv("PLANNER_MODE", "rule")
 
-        resolved_email = (
-            target_email
-            or self.memory.get_preference("default_email")
-            or self.memory.get_preference("email")
-            or None
-        )
+        if target_email:
+            resolved_email = usable_recipient(target_email)
+        else:
+            resolved_email = (
+                usable_recipient(self.memory.get_preference("default_email"))
+                or usable_recipient(self.memory.get_preference("email"))
+            )
 
-        if planner_mode == "llm" and os.getenv("OPENAI_API_KEY"):
+        if planner_mode == "llm":
             return self._plan_with_llm(command, resolved_email)
         else:
             return self.rule_planner.plan(command, resolved_email)
 
     def _plan_with_llm(self, command: str, target_email: str | None = None) -> dict:
-        """Use OpenAI to generate a detailed execution plan."""
+        """Use the configured LLM to generate a detailed execution plan."""
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            configured = get_llm_client()
+            if configured is None:
+                raise RuntimeError("No LLM is configured; set LLM_PROVIDER=ollama or add OPENAI_API_KEY")
+            client, model, _provider_name = configured
 
             system_prompt = """You are a task planning agent. Given a user command, break it down into ordered steps using these tools:
 
@@ -49,6 +51,8 @@ Available tools:
 - summarize: Summarize gathered information. Args: {"mode": "bullet"|"comparison", "max_sentences": int}
 - email: Send email with results. Args: {"to": str, "subject": str, "body": str (optional)}
 - logger: Log completion message. Args: {"message": str}
+
+Never invent or guess an email address. Only include an email step when a real target email is supplied below. If no target email is supplied, do not include an email step.
 
 Return ONLY a valid JSON object with this structure:
 {
@@ -67,7 +71,7 @@ Be specific with queries and arguments. Do not include markdown formatting or ex
                 user_prompt += f"\nTarget email: {target_email}"
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -99,14 +103,62 @@ Be specific with queries and arguments. Do not include markdown formatting or ex
                     s["dependencies"] = [prev_id] if prev_id is not None else []
                 prev_id = s.get("id")
 
-            # Add target email if provided and not already in plan
+            # The UI's optional email field means: send these results there.
+            # Discard model-invented recipients and create exactly one step only
+            # when a validated recipient was supplied by the user or memory.
+            original_email_ids = {
+                str(step.get("id")) for step in plan["steps"]
+                if step.get("tool") == "email"
+            }
+            non_email_steps = [s for s in plan["steps"] if s.get("tool") != "email"]
+            for step in non_email_steps:
+                step["dependencies"] = [
+                    dep for dep in step.get("dependencies", [])
+                    if str(dep) not in original_email_ids
+                ]
             if target_email:
-                has_email_step = any(s.get("tool") == "email" for s in plan["steps"])
-                if has_email_step:
-                    for step in plan["steps"]:
-                        if step.get("tool") == "email" and "to" in step.get("args", {}):
-                            if not step["args"]["to"]:
-                                step["args"]["to"] = target_email
+                logger_steps = [s for s in non_email_steps if s.get("tool") == "logger"]
+                work_steps = [s for s in non_email_steps if s.get("tool") != "logger"]
+                referenced = {
+                    str(dep)
+                    for step in work_steps
+                    for dep in step.get("dependencies", [])
+                }
+                terminal_ids = [
+                    step.get("id") for step in work_steps
+                    if str(step.get("id")) not in referenced
+                ]
+                numeric_ids = [
+                    step.get("id") for step in plan["steps"]
+                    if isinstance(step.get("id"), int)
+                ]
+                email_id = max(numeric_ids, default=0) + 1
+                email_step = {
+                    "id": email_id,
+                    "tool": "email",
+                    "args": {
+                        "to": target_email,
+                        "subject": f"AURA results: {command[:100]}",
+                    },
+                    "dependencies": terminal_ids,
+                }
+                for logger_step in logger_steps:
+                    logger_step["dependencies"] = [email_id]
+                plan["steps"] = work_steps + [email_step] + logger_steps
+            else:
+                referenced = {
+                    str(dep)
+                    for step in non_email_steps
+                    for dep in step.get("dependencies", [])
+                }
+                terminal_ids = [
+                    step.get("id") for step in non_email_steps
+                    if str(step.get("id")) not in referenced
+                ]
+                for step in non_email_steps:
+                    if step.get("tool") == "logger":
+                        step["dependencies"] = terminal_ids
+                plan["steps"] = non_email_steps
 
             return plan
 

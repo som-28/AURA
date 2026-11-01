@@ -10,6 +10,7 @@ Supports:
 from __future__ import annotations
 import asyncio
 import importlib
+import time
 from typing import List, Optional
 from src.agent.models import TaskEvent, validate_plan, PlanStep
 from src.agent.task_graph import TaskGraph
@@ -21,11 +22,13 @@ from src.utils.config import load_config
 
 
 class Controller:
-    def __init__(self, cfg=None, memory: Optional[Memory] = None, use_enhanced=True):
+    def __init__(self, cfg=None, memory: Optional[Memory] = None, use_enhanced=True, on_event=None):
         self.cfg = cfg or load_config()
         self.memory = memory or Memory()
         self.events: List[TaskEvent] = []
+        self.outputs: dict[str, dict] = {}
         self.registry = default_tool_registry(use_enhanced=use_enhanced)
+        self.on_event = on_event
         self.tool_map = {
             name: self.registry.get(name).module_path
             for name in self.registry.names()
@@ -35,14 +38,15 @@ class Controller:
         return list(self.events)
 
     def _emit_event(self, event_type: str, message: str, task_id=None, **metadata):
-        self.events.append(
-            TaskEvent(
+        event = TaskEvent(
                 event_type=event_type,
                 task_id=str(task_id) if task_id is not None else None,
                 message=message,
                 metadata=metadata,
             )
-        )
+        self.events.append(event)
+        if self.on_event:
+            self.on_event(event.model_dump(mode="json"))
 
     async def execute_plan(self, plan: dict, run_id: Optional[str] = None) -> List[str]:
         validated_plan = validate_plan(plan, self.registry)
@@ -56,6 +60,7 @@ class Controller:
             "preferences": self.memory.get_preferences(),
         }
         self.events = []
+        self.outputs = {}
         self._emit_event("plan_started", "Plan execution started")
 
         lock = asyncio.Lock()
@@ -100,8 +105,11 @@ class Controller:
             max_retries = tool_spec.max_retries if tool_spec else 1
 
             while True:
+                step_started = time.perf_counter()
                 try:
                     tool_logs, output = await self._invoke_tool(tool_name, args, context)
+                    if output is not None:
+                        self.outputs[task_key] = {"tool": tool_name, "data": output}
                     verification = verify_tool_output(tool_name, output)
 
                     if not verification.verified:
@@ -121,6 +129,7 @@ class Controller:
                             tool=tool_name,
                             confidence=verification.confidence,
                             evidence=verification.evidence,
+                            duration_ms=round((time.perf_counter() - step_started) * 1000, 1),
                         )
 
                         if output is not None:
@@ -135,6 +144,7 @@ class Controller:
                             task_id=task_id,
                             tool=tool_name,
                             retry_count=retry_count,
+                            duration_ms=round((time.perf_counter() - step_started) * 1000, 1),
                         )
                     break
 

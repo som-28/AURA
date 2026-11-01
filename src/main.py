@@ -1,15 +1,21 @@
 import asyncio
 import base64
 import binascii
+import ipaddress
+import json
 import os
+import socket
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import requests
+from urllib.parse import urlsplit
 from typing import Optional, Any
 from src.agent.planner import Planner as RulePlanner
 from src.agent.planner_llm import LLMPlanner
@@ -54,6 +60,10 @@ class ResumeMatchRequest(BaseModel):
     limit: int = 10
 
 
+class LinkCheckRequest(BaseModel):
+    urls: list[str]
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -68,14 +78,149 @@ def run_status(events: list[dict]) -> str:
     for event in events:
         if event.get("task_id") and event.get("event_type") in terminal_events:
             task_states[event["task_id"]] = event["event_type"]
-    if any(state == "task_failed" for state in task_states.values()):
-        return "failed"
-    return "completed"
+    states = set(task_states.values())
+    completed = "task_completed" in states
+    if "task_failed" in states:
+        return "partial" if completed else "failed"
+    if "task_skipped" in states:
+        return "partial" if completed else "failed"
+    return "completed" if completed or not states else "failed"
+
+
+def user_facing_outputs(outputs: dict[str, dict]) -> dict:
+    """Keep only compact, safe-to-display summaries and real HTTP links."""
+    results = []
+    seen_urls = set()
+    summary = None
+    search_message = None
+    search_available = None
+    email_status = None
+
+    for item in outputs.values():
+        data = item.get("data") or {}
+        if not isinstance(data, dict):
+            continue
+        if data.get("summary"):
+            summary = str(data["summary"])
+        if data.get("search_available") is False:
+            search_available = False
+            search_message = data.get("message") or "Live search is not configured."
+        elif data.get("search_available") is True:
+            search_available = True
+        if "email_sent" in data:
+            if data.get("email_sent"):
+                email_status = "Results emailed successfully."
+            elif data.get("reason") == "missing_recipient":
+                email_status = "Email skipped: add a recipient address to the email field."
+            elif data.get("error"):
+                email_status = str(data["error"])
+        candidates = list(data.get("job_matches") or data.get("results") or [])
+        for page in data.get("pages", []) or []:
+            if isinstance(page, dict) and page.get("url"):
+                try:
+                    host = urlsplit(str(page["url"])).hostname or "Source page"
+                except ValueError:
+                    host = "Source page"
+                candidates.append({
+                    "title": page.get("title") or host.removeprefix("www."),
+                    "url": page["url"],
+                    "snippet": str(page.get("text") or "")[:280],
+                    "source": host.removeprefix("www."),
+                    "provider": "AURA page reader",
+                })
+        if not isinstance(candidates, list):
+            continue
+        for result in candidates:
+            if not isinstance(result, dict):
+                continue
+            url = str(result.get("url") or result.get("link") or "").strip()
+            if not url.startswith(("https://", "http://")) or "example.com/" in url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            results.append({
+                "title": str(result.get("title") or "Opportunity"),
+                "snippet": str(result.get("snippet") or ""),
+                "url": url,
+                "relevance": str(result.get("relevance") or ""),
+                "source": str(result.get("source") or urlsplit(url).hostname or "Web"),
+                "provider": str(result.get("provider") or "Web search"),
+                "found_at": result.get("found_at"),
+                "published_at": result.get("published_at"),
+                "company": str(result.get("company") or ""),
+                "location": str(result.get("location") or ""),
+                "work_mode": str(result.get("work_mode") or ""),
+                "salary": str(result.get("salary") or ""),
+                "employment_type": str(result.get("employment_type") or ""),
+            })
+
+    return {
+        "results": results[:15],
+        "summary": summary,
+        "search_available": search_available,
+        "search_message": search_message,
+        "email_status": email_status,
+    }
+
+
+def check_public_link(raw_url: str) -> dict:
+    """Check an external result URL without following redirects or fetching content."""
+    try:
+        parts = urlsplit(raw_url)
+        host = parts.hostname
+        if parts.scheme not in {"http", "https"} or not host or parts.username or parts.password:
+            return {"url": raw_url, "status": "unsafe", "message": "Unsupported or unsafe link"}
+        if host.lower() in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal")):
+            return {"url": raw_url, "status": "unsafe", "message": "Private address blocked"}
+        addresses = [ipaddress.ip_address(host)] if _is_ip_address(host) else [
+            ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        ]
+        if not addresses or any(not address.is_global for address in addresses):
+            return {"url": raw_url, "status": "unsafe", "message": "Private address blocked"}
+    except (ValueError, OSError):
+        return {"url": raw_url, "status": "unavailable", "message": "Could not resolve this link"}
+
+    try:
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.head(raw_url, timeout=(3, 5), allow_redirects=False,
+                                    headers={"User-Agent": "AURA-Link-Check/1.0"})
+            if response.status_code in {403, 405, 501}:
+                response.close()
+                response = session.get(raw_url, timeout=(3, 5), allow_redirects=False, stream=True,
+                                       headers={"User-Agent": "AURA-Link-Check/1.0", "Range": "bytes=0-0"})
+            code = response.status_code
+            response.close()
+        if 200 <= code < 300:
+            return {"url": raw_url, "status": "reachable", "message": "Link is reachable", "http_status": code}
+        if 300 <= code < 400:
+            return {"url": raw_url, "status": "redirect", "message": "Link redirects; open to confirm destination", "http_status": code}
+        if code in {404, 410}:
+            return {"url": raw_url, "status": "broken", "message": f"Link returned HTTP {code}", "http_status": code}
+        if code >= 400:
+            return {"url": raw_url, "status": "unavailable", "message": f"Site returned HTTP {code}; open to confirm", "http_status": code}
+    except requests.RequestException:
+        pass
+    return {"url": raw_url, "status": "unavailable", "message": "Link could not be checked right now"}
+
+
+def _is_ip_address(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "aura"}
+
+
+@app.post("/links/check")
+async def check_links(req: LinkCheckRequest):
+    urls = list(dict.fromkeys(url.strip() for url in req.urls if isinstance(url, str) and url.strip()))[:15]
+    results = await asyncio.gather(*(asyncio.to_thread(check_public_link, url) for url in urls))
+    return {"checked_at": utc_now(), "results": results}
 
 
 @app.post("/resume/analyze")
@@ -139,8 +284,7 @@ async def match_resume(req: ResumeMatchRequest):
     return {"logs": logs, **output}
 
 
-@app.post("/run")
-async def run_task(req: RunRequest):
+async def _execute_run(req: RunRequest, progress_queue=None):
     goal = (req.goal or req.command or "").strip()
     if not goal:
         raise HTTPException(status_code=422, detail="A goal or command is required")
@@ -154,10 +298,23 @@ async def run_task(req: RunRequest):
         elif req.planner == "llm":
             active_planner = LLMPlanner(cfg, memory=memory)
 
-        plan = active_planner.plan(goal, target_email=req.email)
-        logs = await controller.execute_plan(plan, run_id=run_id)
-        events = serialize_events(controller.get_events())
+        if progress_queue is not None:
+            progress_queue.put_nowait({"event_type": "planning", "message": "Preparing your journey"})
+        plan = await asyncio.to_thread(active_planner.plan, goal, target_email=req.email)
+        run_controller = Controller(
+            cfg,
+            memory=memory,
+            on_event=(progress_queue.put_nowait if progress_queue is not None else None),
+        )
+        logs = await run_controller.execute_plan(plan, run_id=run_id)
+        events = serialize_events(run_controller.get_events())
         status = run_status(events)
+        display_outputs = user_facing_outputs(run_controller.outputs)
+        failed_event = next((event for event in reversed(events) if event.get("event_type") == "task_failed"), None)
+        failure_reason = None
+        if failed_event:
+            failure_reason = (failed_event.get("metadata") or {}).get("error") or failed_event.get("message")
+        completed_at = utc_now()
         record = {
             "run_id": run_id,
             "goal": goal,
@@ -166,8 +323,11 @@ async def run_task(req: RunRequest):
             "plan": plan,
             "logs": logs,
             "events": events,
+            **display_outputs,
+            "failure_reason": failure_reason,
             "created_at": created_at,
-            "completed_at": utc_now(),
+            "completed_at": completed_at,
+            "duration_ms": round((datetime.fromisoformat(completed_at) - datetime.fromisoformat(created_at)).total_seconds() * 1000),
             "tasks_completed": sum(event.get("event_type") == "task_completed" for event in events),
             "verification_events": sum(event.get("event_type") == "task_verified" for event in events),
         }
@@ -185,6 +345,32 @@ async def run_task(req: RunRequest):
         }
         run_store.save(record)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/run")
+async def run_task(req: RunRequest):
+    return await _execute_run(req)
+
+
+@app.post("/run/stream")
+async def run_task_stream(req: RunRequest):
+    async def event_stream():
+        queue = asyncio.Queue()
+        task = asyncio.create_task(_execute_run(req, queue))
+        while not task.done() or not queue.empty():
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                yield f"event: progress\ndata: {json.dumps(event)}\n\n"
+            except asyncio.TimeoutError:
+                continue
+        try:
+            result = task.result()
+            yield f"event: result\ndata: {json.dumps(result)}\n\n"
+        except HTTPException as error:
+            payload = {"message": error.detail}
+            yield f"event: error\ndata: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/runs")

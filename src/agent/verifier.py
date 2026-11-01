@@ -22,6 +22,12 @@ def verify_tool_output(tool_name: str, output: Any) -> VerificationResult:
         )
 
     if tool_name == "search":
+        if output.get("search_available") is False:
+            return VerificationResult(
+                verified=False,
+                confidence=0.0,
+                issues=[output.get("message") or "Live search is unavailable"],
+            )
         return _verify_items(output.get("results"), "Search returned no results", ("title", "url"))
     if tool_name == "scrape":
         return _verify_items(output.get("pages"), "Scraper returned no pages", ("url", "text"))
