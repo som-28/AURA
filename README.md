@@ -1,3 +1,4 @@
+| `LLM_PROVIDER` | `ollama`, `openai`, or `gemini` planner selection | Defaults to `llm` in `.env.example` |
 # AURA
 
 ## Autonomous Unified Reasoning & Automation Agent
@@ -35,7 +36,12 @@ User goal
 - Email sending or clearly labelled simulation when SMTP is unavailable.
 - Resume parsing for PDF, DOCX, and TXT files.
 - Resume analysis with AI or deterministic local fallback.
-- Job matching from an analyzed resume.
+- Explainable job matching with profile evidence, visible skill gaps, and confidence labels.
+- A persistent career workspace with saved search preferences and a deduplicated job digest.
+- Application pipeline tracking saved roles, application status, notes, and follow-up dates.
+- Profile-grounded editable application drafts and practical skill-gap plans.
+- Optional weekly role digest email while the local AURA server is running.
+- AURA World: branching curiosity portals, unexpected crossovers between interests, a growing constellation, and a companion that evolves with discoveries.
 - Execution logging.
 
 ### User interface
@@ -85,7 +91,7 @@ FastAPI backend
     +--> Atomic JSON run store
 ```
 
-The backend owns execution and persistence. The browser UI calls the existing FastAPI endpoints for task execution, run history, resume analysis, job matching, capabilities, memory, and evaluation data.
+The backend owns execution and persistence. The browser UI calls the FastAPI endpoints for task execution, run history, resume analysis, job matching, career preferences and pipeline, profile details and saved resume, capabilities, memory, and evaluation data. Local mode stores data in ignored JSON files and keeps the current resume in `.aura_career_files/`. Optional Neon PostgreSQL mode stores structured state and resume bytes in the database.
 
 ## Project Structure
 
@@ -192,6 +198,9 @@ The repository includes `render.yaml` and a Dockerfile for a Render Blueprint de
 | `LLM_REQUEST_TIMEOUT` | Timeout in seconds for model requests | Defaults to `120` |
 | `SUMMARY_MODE` | `extractive` or `llm` | Defaults to fast local extractive summaries |
 | `OPENAI_API_KEY` | Optional hosted OpenAI key when `LLM_PROVIDER=openai` | Optional |
+| `OPENAI_MODEL` | OpenAI model name | Optional |
+| `GEMINI_API_KEY` | Optional Google Gemini key when `LLM_PROVIDER=gemini` | Optional |
+| `GEMINI_MODEL` | Gemini model name; defaults to `gemini-2.0-flash` | Optional |
 | `SERPAPI_KEY` | Live web search | Optional |
 | `GOOGLE_SEARCH_API_KEY` | Google Custom Search API key | Optional |
 | `GOOGLE_SEARCH_ENGINE_ID` | Google Custom Search engine ID | Optional |
@@ -203,6 +212,21 @@ The repository includes `render.yaml` and a Dockerfile for a Render Blueprint de
 | `SMTP_FROM` | Verified sender address used in the From header | Optional; falls back to `DEFAULT_FROM`, then `SMTP_USER` |
 | `AURA_RUN_STORE` | Custom path for persisted run records | Optional |
 | `AURA_MEMORY_STORE` | Custom path for saved preferences and memory | Optional |
+| `AURA_CAREER_STORE` | Custom path for the local career profile, preferences, and pipeline store | Optional |
+| `AURA_WORLD_STORE` | Custom path for local AURA World discoveries and constellation progress | Optional |
+| `AURA_STORAGE_BACKEND` | `local` (default) or `neon` for hosted PostgreSQL persistence | Optional |
+| `NEON_DATABASE_URL` | Neon PostgreSQL connection URL override | Optional when Neon CLI provides `DATABASE_URL`; secret |
+| `DATABASE_URL` | Neon PostgreSQL connection URL supplied by Neon CLI | Required for Neon mode unless `NEON_DATABASE_URL` is set; secret |
+| `AURA_USER_ID` | Stable database owner key for this AURA deployment | Defaults to `single-user`; not an authentication system |
+| `AURA_AUTH_REQUIRED` | Require Clerk sign-in for all non-static routes | Defaults to `true` |
+| `CLERK_PUBLISHABLE_KEY` | Clerk development or production publishable key | Public; required by the browser sign-in client |
+| `CLERK_SECRET_KEY` | Clerk server key used to verify session tokens | Secret; keep on the server |
+| `CLERK_JWT_KEY` | Optional Clerk JWT public key for local token verification | Public; optional when `CLERK_SECRET_KEY` is configured |
+| `CLERK_AUTHORIZED_PARTIES` | Comma-separated trusted app origins | Defaults to local AURA origins |
+
+The weekly career digest is opt-in. Save a recipient email and choose **Weekly email** in the Career workspace; AURA checks for new roles every six hours and sends at most one digest per week. The app must be running, live search must be configured, and SMTP must be working. **On demand** keeps searches manual. AURA never applies to roles or emails a digest without the selected recipient and schedule.
+
+AURA World is separate from career tools. Portal choices and discoveries are stored locally in `.aura_world.json`; the companion and constellation grow from the discoveries. It has no streaks or leaderboards.
 
 When a live service is not configured, AURA reports fallback, simulation, or unavailable status rather than silently claiming live external data.
 
@@ -262,9 +286,37 @@ GET /runs/{run_id}
 ```text
 POST /resume/analyze
 POST /resume/match
+GET  /profile
+PUT  /profile
+POST /profile/resume
+GET  /profile/resume
 ```
 
 Resume analysis accepts a base64-encoded PDF, DOCX, or TXT payload with a 10 MB limit. The UI uses these endpoints directly, so parsing and matching remain backend-owned operations.
+
+The Resume Studio draft syncs through `GET /resume/studio` and `PUT /resume/studio`. Its existing browser copy is kept as a recovery cache; when the studio next opens, an existing device draft is copied to the server if no server draft exists, while an existing server draft takes precedence.
+
+### Career workspace
+
+```text
+GET    /career/profile
+GET    /career/preferences
+PUT    /career/preferences
+GET    /career/roles
+POST   /career/roles
+PATCH  /career/roles/{role_id}
+POST   /career/skill-plan
+POST   /career/application-kit
+POST   /career/digest
+POST   /career/digest/email
+```
+
+### AURA World
+
+```text
+GET    /world
+POST   /world/discoveries
+```
 
 ## Testing
 
@@ -279,6 +331,20 @@ The tests cover typed plan validation, dependency ordering, verification, bounde
 ## Persistence and Privacy
 
 Execution records are stored in `.aura_runs.json` by default. The file is ignored by Git because it can contain goals, outputs, and execution metadata. Set `AURA_RUN_STORE` to use another local path.
+
+The career workspace stores extracted profile fields, saved contact details, search preferences, saved opportunities, follow-up dates, and digest de-duplication state in `.aura_career.json` by default. Local mode keeps the original resume in `.aura_career_files/`; Neon mode stores its bytes in a separate database table. Replacing it retains only the new current copy. Set `AURA_CAREER_STORE` to move the local profile store (the resume folder uses the same filename stem), or `AURA_WORLD_STORE` to choose another world-data location. AURA World discoveries are stored in `.aura_world.json`.
+
+### Neon PostgreSQL persistence
+
+Set `AURA_STORAGE_BACKEND=neon` and provide `DATABASE_URL` (from `neon deploy`) or the explicit `NEON_DATABASE_URL` override to enable Neon PostgreSQL for career data, execution history, memory, and AURA World. `AURA_USER_ID` scopes every record and resume file to a stable owner key. Local JSON remains the default when Neon mode is not selected. Before starting the hosted server, configure the database variables and run `python scripts/migrate_local_to_neon.py`; the import skips namespaces already present in the destination. The migration does not delete or modify local files.
+
+`npm run build` checks the browser JavaScript syntax and Python source compilation; the frontend is served as static HTML, CSS, and JavaScript rather than bundled by a frontend framework.
+
+Clerk protects the API and Neon records use the verified Clerk user ID. Keep the cloud connection URL and Clerk secret server-side; never put either in frontend code or commit them. Production Clerk keys and allowed origins must be configured separately on the host before a public release.
+
+When Clerk is configured, the browser gate loads ClerkJS and attaches its verified session token to same-origin API requests. FastAPI verifies every non-static request and scopes Neon records by the Clerk subject (`sub`) using request-local context. The static HTML, CSS, JavaScript, auth configuration, and health route remain public. Clerk secrets belong in `.env.local` or the host's secret manager; they are never returned by `/auth/config`.
+
+Existing data migrated before Clerk setup remains under the old `AURA_USER_ID`. After the account owner signs in, read their verified subject from `GET /auth/me` and run `python scripts/transfer_legacy_neon_owner.py --to-user-id <user_id>` once to transfer the previous single-user data. The script refuses to merge into an already populated Clerk account.
 
 Do not commit `.env` files, API keys, uploaded resumes, personal documents, `.aura_runs.json`, generated reports, or sensitive logs.
 

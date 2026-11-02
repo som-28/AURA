@@ -9,13 +9,29 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Silkscreen:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=aura-empty-state-fix-1" />
-  <script>try { if (localStorage.getItem('aura-theme') !== 'light') document.documentElement.classList.add('dark-mode'); } catch { document.documentElement.classList.add('dark-mode'); }</script>
+  <link rel="stylesheet" href="/styles.css?v=auth-paper-7" />
+  <script>try { if (localStorage.getItem('aura-theme') !== 'light') document.documentElement.classList.add('dark-mode'); } catch { document.documentElement.classList.add('dark-mode'); } document.documentElement.classList.add('auth-pending');</script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="ambient ambient-three"></div>
   <canvas class="sky-canvas" id="sky-canvas" aria-hidden="true"></canvas>
+  <section class="auth-gate" id="clerk-auth-gate" aria-labelledby="auth-title" hidden>
+    <div class="auth-sheet">
+      <div class="auth-intro">
+        <div class="auth-brand"><span class="brand-mark">A</span><span class="brand-name">aura<span class="brand-slash">/</span>workspace</span></div>
+        <span class="section-kicker" id="auth-kicker">YOUR PRIVATE WORKSPACE</span>
+        <h1 id="auth-title">Welcome back.</h1>
+        <p id="auth-copy">Sign in to open your AURA workspace.</p>
+        <div class="auth-note"><span>01</span><span>Your work, profile, and resume stay in your own workspace.</span></div>
+      </div>
+      <div class="auth-form-panel">
+        <div class="auth-form-heading"><span class="section-kicker">ACCOUNT ACCESS</span><h2>Sign in</h2><p>Continue with Google or use your email.</p></div>
+        <div id="clerk-auth-control" class="clerk-auth-control"></div>
+        <p id="auth-error" class="auth-error" role="status" aria-live="polite" hidden></p>
+      </div>
+    </div>
+  </section>
   <div class="app-shell">
     <div class="workspace">
       <main class="main-content" id="main-content">
@@ -28,10 +44,12 @@
             <button class="nav-item" type="button" data-page="journeys">01 <span>journeys</span></button>
             <button class="nav-item" type="button" data-page="talent">02 <span>talent</span></button>
             <button class="nav-item" type="button" data-page="capabilities">03 <span>tools</span></button>
-            <button class="nav-item" type="button" data-page="insights">04 <span>insights</span></button>
+            <button class="nav-item" type="button" data-page="resume">04 <span>resume studio</span></button>
+            <button class="nav-item" type="button" data-page="profile">05 <span>profile</span></button>
           </nav>
           <div class="masthead-actions">
             <span class="connection"><i class="connection-dot"></i><span id="connection-label">Connecting</span></span>
+            <div class="clerk-user-control" id="clerk-user-control" hidden></div>
             <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode"><span class="theme-mode-label">LIGHT MODE</span><span class="theme-toggle-glyph" aria-hidden="true">◐</span></button>
           </div>
         </div>
@@ -77,7 +95,7 @@
               <div class="overview-card glass-panel">
                 <div class="overview-top"><span class="overview-icon" data-icon="spark"></span><span class="overview-label">EXECUTION OVERVIEW</span></div>
                 <div class="overview-metrics"><div><strong id="home-runs">—</strong><span>Journeys</span></div><div><strong id="home-success">—</strong><span>Success rate</span></div></div>
-                <div class="overview-foot"><span class="overview-foot-dot"></span><span id="overview-foot-text">Checking your workspace</span><button data-navigate="insights" aria-label="View insights" data-icon="arrow-up-right"></button></div>
+                <div class="overview-foot"><span class="overview-foot-dot"></span><span id="overview-foot-text">Checking your workspace</span><button data-navigate="resume" aria-label="Open Resume Studio" data-icon="arrow-up-right"></button></div>
               </div>
               <div class="recent-card glass-panel">
                 <div class="card-heading"><h3>Recent journeys</h3><button class="text-link" data-navigate="journeys">See all <span data-icon="arrow-right"></span></button></div>
@@ -106,15 +124,52 @@
         </section>
 
         <section class="page" id="page-talent" data-page="talent">
-          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>02 / TALENT</span></div><h1>Talent dossier</h1><p>Understand a candidate profile and find roles that fit.</p></div>
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>02 / CAREER WORKSPACE</span></div><h1>Career workspace</h1><p>Find roles that fit your evidence, build a thoughtful application, and keep your next steps together.</p></div>
           <div class="talent-grid">
             <div class="upload-card glass-panel"><div class="panel-heading"><span class="panel-icon blue" data-icon="upload"></span><div><h2>Resume</h2><p>PDF, DOCX, or TXT · up to 10 MB</p></div></div>
-              <label class="dropzone" id="dropzone"><input type="file" id="resume-file" accept=".pdf,.docx,.txt" /><span class="upload-symbol" data-icon="upload"></span><strong id="upload-title">Choose a file or drop it here</strong><span id="upload-caption">Your document is processed by AURA.</span></label>
+              <label class="dropzone" id="dropzone"><input type="file" id="resume-file" accept=".pdf,.docx,.txt" /><span class="upload-symbol" data-icon="upload"></span><strong id="upload-title">Choose a file or drop it here</strong><span id="upload-caption">Your current resume is saved in Profile for next time.</span></label>
               <button class="button-primary full-width" id="analyze-button" disabled><span>Analyze resume</span><span class="button-arrow" data-icon="arrow"></span></button>
+              <p class="career-analysis-status" id="resume-analysis-status" role="status" aria-live="polite" hidden></p>
             </div>
             <div class="profile-card glass-panel"><div class="panel-heading"><span class="panel-icon violet" data-icon="person"></span><div><h2>Candidate profile</h2><p>Skills, experience, and role matches</p></div></div><div id="profile-content" class="empty-profile"><span class="empty-art" data-icon="doc"></span><strong>No profile yet</strong><span>Upload a resume and AURA will organize the details here.</span></div></div>
           </div>
+          <section class="career-preferences">
+            <div class="section-heading"><div><span class="section-kicker">YOUR SEARCH BRIEF</span><h2>Roles worth your attention</h2><p>Set your target once; AURA remembers it on this device.</p></div></div>
+            <form class="career-preferences-grid" id="career-preferences-form">
+              <label>Target role<input id="career-target-role" placeholder="e.g. SOC Analyst fresher" required /></label>
+              <label>Location<input id="career-location" placeholder="Remote or Delhi" /></label>
+              <label>Keywords<input id="career-keywords" placeholder="SIEM, Python, entry level" /></label>
+              <label>Minimum annual salary
+                <select id="career-min-salary">
+                  <option value="">Any salary</option>
+                  <option value="200000">₹2 LPA+</option>
+                  <option value="300000">₹3 LPA+</option>
+                  <option value="400000">₹4 LPA+</option>
+                  <option value="500000">₹5 LPA+</option>
+                  <option value="600000">₹6 LPA+</option>
+                  <option value="800000">₹8 LPA+</option>
+                  <option value="1000000">₹10 LPA+</option>
+                  <option value="1200000">₹12 LPA+</option>
+                  <option value="1500000">₹15 LPA+</option>
+                  <option value="2000000">₹20 LPA+</option>
+                  <option value="2500000">₹25 LPA+</option>
+                  <option value="3000000">₹30 LPA+</option>
+                  <option value="4000000">₹40 LPA+</option>
+                  <option value="5000000">₹50 LPA+</option>
+                  <option value="7500000">₹75 LPA+</option>
+                  <option value="10000000">₹1 crore+</option>
+                </select>
+              </label>
+              <label>Digest email<input id="career-digest-email" type="email" placeholder="Optional" /></label>
+              <label>Work mode<select id="career-work-mode"><option value="">Any</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="on-site">On-site</option></select></label>
+              <label>Digest schedule<select id="career-digest-frequency"><option value="off">On demand</option><option value="weekly">Weekly email</option></select></label>
+              <div class="career-preference-actions"><button class="button-secondary" type="submit">Save search brief</button><button class="button-primary" id="career-digest-button" type="button">Find new roles <span class="button-arrow" data-icon="arrow"></span></button></div>
+            </form>
+            <p class="career-schedule-note">Weekly emails run while AURA is open. They need a saved email address and working SMTP settings.</p>
+            <div class="career-digest-results" id="career-digest-results" aria-live="polite"></div>
+          </section>
           <div class="matches-section hidden" id="matches-section"><div class="section-heading"><div><span class="section-kicker">CURATED FOR THIS PROFILE</span><h2>Matching roles</h2></div><div class="match-controls"><input id="location-input" value="remote" aria-label="Location preference" /><button class="button-secondary" id="match-button">Find roles <span data-icon="arrow-right"></span></button></div></div><div id="matches-list" class="matches-grid"></div></div>
+          <section class="career-pipeline" id="career-pipeline"><div class="section-heading"><div><span class="section-kicker">YOUR NEXT STEPS</span><h2>Application pipeline</h2><p id="pipeline-caption">Roles you save will appear here with follow-ups.</p></div></div><div id="career-reminders" class="career-reminders"></div><div id="career-roles" class="career-roles"></div></section>
         </section>
 
         <section class="page" id="page-capabilities" data-page="capabilities">
@@ -123,16 +178,72 @@
           <div class="capability-grid" id="capability-list"></div>
         </section>
 
-        <section class="page" id="page-insights" data-page="insights">
-          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>04 / INSIGHTS</span></div><h1>Insights</h1><p>A clear picture of how AURA is working across your journeys.</p></div>
-          <div class="insight-metrics" id="insight-metrics"></div>
-          <div class="insights-grid"><div class="insight-panel glass-panel"><div class="card-heading"><div><span class="section-kicker">PLANNING</span><h2>Planner performance</h2></div></div><div id="planner-breakdown" class="breakdown-list"></div></div><div class="insight-panel glass-panel"><div class="card-heading"><div><span class="section-kicker">RELIABILITY</span><h2>Fault classifications</h2></div></div><div id="fault-breakdown" class="breakdown-list"></div></div></div>
-          <div class="memory-panel glass-panel"><div class="section-heading"><div><span class="section-kicker">PERSONAL CONTEXT</span><h2>Memory archive</h2></div><button id="memory-refresh" class="icon-button" aria-label="Refresh memory" data-icon="refresh"></button></div><div class="memory-grid"><div id="memory-content" class="memory-content"></div><form id="preference-form" class="preference-form"><label>Preference name<input id="preference-key" placeholder="e.g. target_role" required /></label><label>Value<input id="preference-value" placeholder="e.g. Python engineer" required /></label><button class="button-secondary" type="submit">Save preference <span data-icon="arrow-right"></span></button><button class="reset-link" type="button" id="memory-reset">Reset memory</button></form></div></div>
+        <section class="page" id="page-resume" data-page="resume">
+          <div class="page-heading resume-page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>04 / YOUR CAREER, ON PAPER</span></div><h1>Resume studio</h1><p>Shape your experience into a resume that sounds like you. Your edits save as you work.</p></div>
+          <div class="resume-toolbar">
+            <div class="resume-document-switch"><span class="resume-document-icon" aria-hidden="true">A</span><div><strong id="resume-doc-name">Untitled resume</strong><span id="resume-save-state">Saved on this device</span></div></div>
+            <div class="resume-toolbar-actions"><label class="button-secondary resume-import-button" for="resume-studio-file">Import resume</label><input id="resume-studio-file" type="file" accept=".pdf,.docx,.txt" /><button class="button-secondary" id="resume-new-button" type="button">New resume</button><button class="button-primary" id="resume-export-button" type="button"><span>Export PDF</span><span class="button-arrow">↗</span></button></div>
+          </div>
+          <div class="resume-studio-layout">
+            <aside class="resume-editor">
+              <div class="resume-editor-heading"><span class="section-kicker">YOUR DETAILS</span><span class="resume-step-count" id="resume-completion">0% complete</span></div>
+              <form id="resume-form" autocomplete="on">
+                <details class="resume-edit-section" open><summary><span><i>01</i> Intro</span><b>−</b></summary><div class="resume-fields">
+                  <label>Full name<input name="name" placeholder="Your name" /></label><label>Professional title<input name="title" placeholder="e.g. Product designer" /></label>
+                  <div class="resume-fields-pair"><label>Email<input name="email" type="email" placeholder="you@email.com" /></label><label>Phone<input name="phone" type="tel" placeholder="+91 …" /></label></div>
+                  <label>Location<input name="location" placeholder="City, Country" /></label>
+                  <div class="resume-links-editor"><div class="resume-links-heading"><span>Links</span><small>Short labels keep the page tidy; each label opens its full URL.</small></div><div id="resume-links-fields"></div><button class="resume-add-row" type="button" data-resume-add="links">＋ Add a link</button></div>
+                  <label>About you<textarea name="summary" rows="4" placeholder="A few specific lines about the work you do best…"></textarea></label>
+                </div></details>
+                <details class="resume-edit-section" open><summary><span><i>02</i> Experience</span><b>−</b></summary><div class="resume-fields"><div id="resume-experience-fields"></div><button class="resume-add-row" type="button" data-resume-add="experience">＋ Add experience</button></div></details>
+                <details class="resume-edit-section"><summary><span><i>03</i> Education</span><b>＋</b></summary><div class="resume-fields"><div id="resume-education-fields"></div><button class="resume-add-row" type="button" data-resume-add="education">＋ Add education</button></div></details>
+                <details class="resume-edit-section"><summary><span><i>04</i> Skills & projects</span><b>＋</b></summary><div class="resume-fields"><label>Skills<textarea name="skills" rows="3" placeholder="Python, Figma, research…"></textarea></label><div id="resume-projects-fields"></div><button class="resume-add-row" type="button" data-resume-add="projects">＋ Add project</button></div></details>
+              </form>
+                <div class="resume-truth-note"><span aria-hidden="true">✳</span><p>Your draft stays in this browser. Uploaded resumes are saved in Profile for future sessions. AURA won’t invent credentials.</p></div>
+            </aside>
+            <section class="resume-preview-column" aria-label="Live resume preview">
+              <div class="resume-preview-top"><div><span class="section-kicker">LIVE PREVIEW</span><span class="resume-page-size">A4 · print layout</span></div><button type="button" id="resume-keyword-toggle" class="resume-keyword-toggle">Tailor to a role <span>＋</span></button></div>
+              <div id="resume-keyword-panel" class="resume-keyword-panel" hidden><label for="resume-job-description">Paste a job description</label><textarea id="resume-job-description" rows="4" placeholder="AURA will highlight relevant words already present in your resume, plus gaps to consider."></textarea><div class="resume-keyword-result" id="resume-keyword-result">Your resume stays yours. Suggestions never add claims.</div></div>
+              <div class="resume-preview-stage">
+                <article class="resume-paper" id="resume-paper" aria-live="polite"><header class="resume-paper-header"><h1>Your name</h1><p class="resume-paper-title">Professional title</p><div class="resume-paper-contact"><span class="resume-contact-placeholder">Add email, location or links</span></div></header><section class="resume-paper-section"><h2>Profile</h2><p class="resume-paper-summary">Add a short, specific introduction about your work and strengths.</p></section><footer class="resume-paper-footer"><span>AURA · RESUME</span><span>LIVE PREVIEW</span></footer></article>
+                <aside class="resume-score-card" aria-label="Transparent ATS rule checks">
+                  <span class="section-kicker">ATS RULE CHECKS</span><div class="resume-score-number"><strong id="resume-ats-score">0</strong><span id="resume-ats-total">/ 0 checks</span></div>
+                  <div class="resume-score-meter" aria-hidden="true"><span id="resume-ats-meter"></span></div>
+                  <p class="resume-score-caption" id="resume-ats-caption">Add your details to see an estimate.</p>
+                  <div class="resume-score-checks" id="resume-ats-checks"></div>
+                  <div class="resume-keyword-score" id="resume-keyword-score" hidden></div>
+                  <p class="resume-score-footnote">Transparent text-level rules, not a score from a specific ATS vendor. Job keyword overlap is shown separately.</p>
+                </aside>
+              </div>
+              <p class="resume-preview-caption">A clean, ATS-friendly page. Choose <strong>Export PDF</strong> to save or print it.</p>
+            </section>
+          </div>
+        </section>
+        <section class="page" id="page-profile" data-page="profile">
+          <div class="page-heading"><div class="eyebrow"><span class="eyebrow-line"></span><span>05 / YOUR DETAILS, KEPT</span></div><h1>Your profile</h1><p>Save your details and one current resume here. Talent and email flows can reuse them next time.</p></div>
+          <div class="profile-page-grid">
+            <form class="profile-details-form" id="profile-details-form">
+              <div class="section-heading"><div><span class="section-kicker">PERSONAL DETAILS</span><h2>Ready when you are</h2><p>These stay in AURA’s local profile store.</p></div></div>
+              <label>Full name<input id="profile-name" name="name" autocomplete="name" maxlength="120" placeholder="Your name" /></label>
+              <label>Email<input id="profile-email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" /></label>
+              <label>Phone<input id="profile-phone" name="phone" type="tel" autocomplete="tel" maxlength="50" placeholder="+91 …" /></label>
+              <label>Location<input id="profile-location" name="location" autocomplete="address-level2" maxlength="120" placeholder="City, Country" /></label>
+              <div class="profile-form-actions"><button class="button-primary" type="submit">Save details <span class="button-arrow" data-icon="arrow"></span></button></div>
+            </form>
+            <section class="profile-resume-section" aria-labelledby="profile-resume-title">
+              <div class="section-heading"><div><span class="section-kicker">YOUR CURRENT RESUME</span><h2 id="profile-resume-title">Keep it on hand</h2><p>One current file is retained locally and reused for future sessions.</p></div></div>
+              <div id="profile-resume-card" class="profile-resume-card" aria-live="polite"><span class="section-kicker">NO RESUME SAVED</span><p>Upload a PDF, DOCX, or TXT resume. AURA will extract your details and keep the original file here.</p></div>
+              <input id="profile-resume-file" type="file" accept=".pdf,.docx,.txt" />
+              <div class="profile-resume-actions"><label class="button-secondary" for="profile-resume-file">Choose resume</label><button class="button-primary" id="profile-resume-save" type="button" disabled>Save resume <span class="button-arrow" data-icon="arrow"></span></button><a class="button-secondary" id="profile-resume-download" href="/profile/resume" hidden>Download saved file ↗</a></div>
+              <p class="career-analysis-status" id="profile-resume-status" role="status" aria-live="polite" hidden></p>
+            </section>
+          </div>
+          <p class="profile-storage-note">Your profile file is stored by this AURA installation and remains available after restarts. Replacing the resume keeps only the new current copy.</p>
         </section>
       </main>
     </div>
     <div class="toast-region" id="toast-region" aria-live="polite"></div>
   </div>
-  <script src="/app.js?v=aura-empty-state-fix-1" defer></script>
+  <script src="/auth-bootstrap.js?v=auth-paper-6" defer></script>
 </body>
 </html>

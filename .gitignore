@@ -48,6 +48,9 @@ htmlcov/
 !.env.example
 agent_memory.json
 .aura_runs.json
+.aura_career.json
+.aura_career_files/
+.aura_world.json
 
 # Temporary files
 temp/
@@ -81,3 +84,5 @@ AURA_Implementation_Roadmap.md
 .DS_Store
 Thumbs.db
 
+.neon
+node_modules/

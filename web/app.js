@@ -1,6 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const state = { runs: [], tools: [], profile: null, file: null, page: 'home' };
+const state = { runs: [], tools: [], profile: null, file: null, profileResumeFile: null, page: 'home', matchJobs: [], digestJobs: [], careerRoles: [], careerPreferences: {}, world: null, activeWorldExperience: null, worldChoice: null };
 
 const icons = {
   spark: '<path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7L12 2Z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/>',
@@ -312,13 +312,15 @@ function setBusy(button, busy, label = 'Working…') {
 }
 
 function navigate(page) {
+  if (page === 'insights' || page === 'world') page = 'resume';
   if (!$('#page-' + page)) page = 'home';
   state.page = page;
   $$('.page').forEach((el) => el.classList.toggle('active', el.dataset.page === page));
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.page === page));
   if (page === 'journeys') loadRuns(true);
+  if (page === 'talent') loadCareerWorkspace();
+  if (page === 'profile') loadProfilePage();
   if (page === 'capabilities') loadCapabilities();
-  if (page === 'insights') loadInsights();
   history.replaceState(null, '', `#${page}`);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -326,9 +328,9 @@ function navigate(page) {
 $$('.nav-item').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page)));
 $$('[data-navigate]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.navigate)));
 document.addEventListener('keydown', (event) => {
-  if (!(event.metaKey || event.ctrlKey) || !/^[1-5]$/.test(event.key)) return;
+  if (!(event.metaKey || event.ctrlKey) || !/^[1-6]$/.test(event.key)) return;
   event.preventDefault();
-  navigate(['home', 'talent', 'journeys', 'capabilities', 'insights'][Number(event.key) - 1]);
+  navigate(['home', 'talent', 'journeys', 'capabilities', 'resume', 'profile'][Number(event.key) - 1]);
 });
 window.addEventListener('hashchange', () => navigate(location.hash.slice(1) || 'home'));
 if (location.hash) navigate(location.hash.slice(1));
@@ -619,16 +621,280 @@ $('#run-form').addEventListener('submit', async (event) => {
   } finally { setBusy(button, false); }
 });
 
+function renderCareerRole(job, index, source) {
+  const existing = state.careerRoles.find((role) => role.url === job.url);
+  const score = Number.isFinite(Number(job.fit_score)) ? Number(job.fit_score) : null;
+  const matched = Array.isArray(job.matched_skills) ? job.matched_skills : [];
+  const missing = Array.isArray(job.missing_skills) ? job.missing_skills : [];
+  const reasons = Array.isArray(job.fit_reasons) ? job.fit_reasons : [];
+  const cardId = `career-${source}-${index}`;
+  return `<article class="career-role" data-career-card data-source="${source}" data-index="${index}">
+    <div class="career-role-top"><div><span class="career-role-index">${String(index + 1).padStart(2, '0')} / ${source === 'digest' ? 'NEW ROLE' : 'PROFILE MATCH'}</span><h3>${escapeHtml(job.title || 'Opportunity')}</h3><div class="career-role-meta">${escapeHtml([job.company, job.location, job.work_mode, job.salary].filter(Boolean).join(' · ') || resultSourceLabel(job))}</div></div><div class="career-fit-score ${score === null ? 'unscored' : score >= 75 ? 'strong' : score >= 50 ? 'potential' : 'stretch'}">${score === null ? '—' : score}<small>${score === null ? 'FIT' : '/ 100'}</small></div></div>
+    ${job.fit_label ? `<div class="career-fit-label">${escapeHtml(job.fit_label)}${job.fit_confidence === 'provisional' ? ' · provisional' : ''}</div>` : '<div class="career-fit-label">Analyze a resume to see a personal fit score</div>'}
+    <div class="career-skill-lines">${matched.length ? `<div><span>Evidence found</span>${matched.map((skill) => `<i>${escapeHtml(skill)}</i>`).join('')}</div>` : ''}${missing.length ? `<div><span>Stated gaps</span>${missing.slice(0, 8).map((skill) => `<i class="gap">${escapeHtml(skill)}</i>`).join('')}</div>` : ''}</div>
+    ${reasons.length ? `<ul class="career-fit-reasons">${reasons.slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>` : ''}
+    ${job.snippet ? `<p class="career-role-snippet">${escapeHtml(_compactTextForUI(job.snippet, 360))}</p>` : ''}
+    <div class="career-role-actions"><a href="${escapeHtml(job.url || '#')}" target="_blank" rel="noopener noreferrer">Open role ↗</a><button class="button-secondary" type="button" data-career-action="save" data-index="${index}" data-source="${source}" ${existing ? 'disabled' : ''}>${existing ? 'Saved' : 'Save role'}</button><button class="button-secondary" type="button" data-career-action="kit" data-index="${index}" data-source="${source}">Application kit</button><button class="career-text-action" type="button" data-career-action="skills" data-index="${index}" data-source="${source}">Skill-gap plan</button></div>
+    <div class="career-role-output" id="${cardId}-output" hidden></div>
+  </article>`;
+}
+
+function _compactTextForUI(value, limit) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text.length > limit ? `${text.slice(0, limit - 1).replace(/\s+\S*$/, '')}…` : text;
+}
+
+function renderCareerPipeline(data) {
+  state.careerRoles = data.roles || [];
+  const roles = state.careerRoles;
+  $('#pipeline-caption').textContent = roles.length ? `${roles.length} saved role${roles.length === 1 ? '' : 's'} · keep your next action visible.` : 'Roles you save will appear here with follow-ups.';
+  const reminders = data.reminders_due || [];
+  $('#career-reminders').innerHTML = reminders.length
+    ? `<div class="career-reminder-note"><strong>${reminders.length} follow-up${reminders.length === 1 ? '' : 's'} due</strong><span>${reminders.map((role) => escapeHtml(role.title)).join(' · ')}</span></div>`
+    : '';
+  $('#career-roles').innerHTML = roles.length ? roles.map((role) => `<article class="career-pipeline-row" data-pipeline-role="${escapeHtml(role.id)}"><div class="pipeline-role-heading"><div><h3>${escapeHtml(role.title)}</h3><span>${escapeHtml([role.company, role.location].filter(Boolean).join(' · '))}</span></div><a href="${escapeHtml(role.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(role.title)}">↗</a></div><form class="pipeline-edit"><label>Status<select name="status"><option value="saved" ${role.status === 'saved' ? 'selected' : ''}>Saved</option><option value="applied" ${role.status === 'applied' ? 'selected' : ''}>Applied</option><option value="interview" ${role.status === 'interview' ? 'selected' : ''}>Interview</option><option value="offer" ${role.status === 'offer' ? 'selected' : ''}>Offer</option><option value="rejected" ${role.status === 'rejected' ? 'selected' : ''}>Rejected</option></select></label><label>Follow up<input type="date" name="follow_up_on" value="${escapeHtml(role.follow_up_on || '')}" /></label><label class="pipeline-note">Note<input name="note" maxlength="2000" placeholder="Recruiter, next step, or reminder" value="${escapeHtml(role.note || '')}" /></label><button class="career-text-action" type="submit">Save update</button></form></article>`).join('') : '<p class="career-empty-line">Save a role from your matches or digest to start tracking applications.</p>';
+}
+
+async function loadCareerWorkspace() {
+  try {
+    const [profileData, preferenceData, roleData] = await Promise.all([api('/career/profile'), api('/career/preferences'), api('/career/roles')]);
+    state.careerPreferences = preferenceData.preferences || {};
+    const prefs = state.careerPreferences;
+    $('#career-target-role').value = prefs.target_role || '';
+    $('#career-location').value = prefs.location || '';
+    $('#location-input').value = prefs.location || 'remote';
+    $('#career-keywords').value = prefs.keywords || '';
+    $('#career-min-salary').value = prefs.min_salary || '';
+    $('#career-digest-email').value = prefs.digest_email || profileData.profile?.email || '';
+    $('#career-work-mode').value = prefs.work_mode || '';
+    $('#career-digest-frequency').value = prefs.digest_frequency || 'off';
+    if (profileData.profile) renderProfile({ analysis: profileData.profile });
+    renderCareerPipeline(roleData);
+  } catch (error) { toast(`Career workspace could not load: ${error.message}`, 'error'); }
+}
+
+function renderProfilePage(data) {
+  const profile = data.profile || {};
+  $('#profile-name').value = profile.name || '';
+  $('#profile-email').value = profile.email || '';
+  $('#profile-phone').value = profile.phone || '';
+  $('#profile-location').value = profile.location || '';
+  const card = $('#profile-resume-card');
+  const resume = data.resume;
+  if (!resume) {
+    card.innerHTML = '<span class="section-kicker">NO RESUME SAVED</span><p>Upload a PDF, DOCX, or TXT resume. AURA will extract your details and keep the original file here.</p>';
+    $('#profile-resume-download').hidden = true;
+    return;
+  }
+  const size = `${Math.max(1, Math.round(Number(resume.size_bytes || 0) / 1024))} KB`;
+  const savedAt = resume.saved_at ? new Date(resume.saved_at).toLocaleString() : 'Saved locally';
+  card.innerHTML = `<span class="section-kicker">SAVED RESUME</span><strong>${escapeHtml(resume.original_name || 'Resume')}</strong><div class="profile-resume-meta"><span>${escapeHtml(size)}</span><span>Updated ${escapeHtml(savedAt)}</span></div><p>Your original resume stays in this AURA profile and is ready across sessions.</p>`;
+  $('#profile-resume-download').hidden = false;
+}
+
+async function loadProfilePage() {
+  try { renderProfilePage(await api('/profile')); }
+  catch (error) {
+    $('#profile-resume-card').innerHTML = `<span class="section-kicker">PROFILE UNAVAILABLE</span><p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+$('#profile-details-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = event.submitter || $('#profile-details-form button[type="submit"]');
+  setBusy(button, true, 'Saving details…');
+  try {
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const result = await api('/profile', { method: 'PUT', body: JSON.stringify(values) });
+    if (state.profile) state.profile = { ...state.profile, ...result.profile };
+    $('#career-digest-email').value = $('#career-digest-email').value || result.profile.email || '';
+    toast('Profile details saved for future sessions.');
+  } catch (error) { toast(error.message, 'error'); }
+  finally { setBusy(button, false); }
+});
+
+$('#profile-resume-file').addEventListener('change', (event) => {
+  state.profileResumeFile = event.currentTarget.files?.[0] || null;
+  const button = $('#profile-resume-save');
+  button.disabled = !state.profileResumeFile;
+  $('#profile-resume-status').hidden = true;
+  if (state.profileResumeFile) $('#profile-resume-status').textContent = `${state.profileResumeFile.name} · ${(state.profileResumeFile.size / 1024 / 1024).toFixed(2)} MB · ready to save`;
+  $('#profile-resume-status').hidden = !state.profileResumeFile;
+});
+
+$('#profile-resume-save').addEventListener('click', async () => {
+  const file = state.profileResumeFile;
+  if (!file) return;
+  const status = $('#profile-resume-status');
+  const button = $('#profile-resume-save');
+  if (file.size > 10 * 1024 * 1024) {
+    status.textContent = 'Choose a resume smaller than 10 MB.';
+    status.hidden = false;
+    return;
+  }
+  setBusy(button, true, 'Saving and reading resume…');
+  status.textContent = 'Saving your resume and extracting reusable profile details…';
+  status.hidden = false;
+  try {
+    const contentBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onerror = () => reject(new Error('Could not read this file.'));
+      reader.readAsDataURL(file);
+    });
+    const result = await api('/profile/resume', { method: 'POST', body: JSON.stringify({ file_name: file.name, content_base64: contentBase64 }) });
+    state.profileResumeFile = null;
+    $('#profile-resume-file').value = '';
+    status.textContent = 'Resume saved. Your extracted details are ready to reuse in Talent.';
+    await loadProfilePage();
+    toast('Resume saved to your profile.');
+    if (result.analysis) state.profile = result.analysis;
+  } catch (error) {
+    status.textContent = `Resume analysis couldn’t finish: ${error.message}. If the file was stored, it will still appear here.`;
+    await loadProfilePage();
+    toast(error.message, 'error');
+  } finally {
+    setBusy(button, false);
+    button.disabled = !state.profileResumeFile;
+  }
+});
+
+function renderCareerResults(target, jobs, source) {
+  target.innerHTML = jobs.length
+    ? `<div class="career-role-list">${jobs.map((job, index) => renderCareerRole(job, index, source)).join('')}</div>`
+    : '<div class="career-empty-line">No new roles this time. Your saved roles are excluded from the next digest.</div>';
+}
+
+function renderApplicationKit(data, panel, panelId) {
+  const bullets = data.resume_bullets || [];
+  const listId = `${panelId}-letter`;
+  panel.innerHTML = `<div class="career-output-heading"><div><span class="section-kicker">EDITABLE DRAFT</span><h4>${escapeHtml(data.title)} · ${escapeHtml(data.company)}</h4></div></div><p class="career-output-notice">${escapeHtml(data.notice)}</p><div class="application-kit-label">Resume evidence to tailor</div><ul class="application-bullets">${bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join('')}</ul><div class="application-kit-label">Cover letter</div><textarea id="${listId}" rows="9">${escapeHtml(data.cover_letter || '')}</textarea><button class="career-text-action" type="button" data-copy-target="${listId}">Copy cover letter</button>`;
+  panel.hidden = false;
+}
+
+$('#career-preferences-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const preferences = {
+      target_role: $('#career-target-role').value.trim(),
+      location: $('#career-location').value.trim(),
+      keywords: $('#career-keywords').value.trim(),
+      work_mode: $('#career-work-mode').value,
+      min_salary: $('#career-min-salary').value || null,
+      digest_email: $('#career-digest-email').value.trim(),
+      digest_frequency: $('#career-digest-frequency').value,
+    };
+    const response = await api('/career/preferences', { method: 'PUT', body: JSON.stringify(preferences) });
+    state.careerPreferences = response.preferences;
+    $('#location-input').value = response.preferences.location || 'remote';
+    toast('Career search brief saved.');
+  } catch (error) { toast(error.message, 'error'); }
+});
+
+$('#career-digest-button').addEventListener('click', async () => {
+  const button = $('#career-digest-button');
+  setBusy(button, true, 'Finding new roles…');
+  $('#career-digest-results').innerHTML = '<div class="history-loading" role="status">Searching your saved brief and removing repeats…</div>';
+  try {
+    const data = await api('/career/digest', { method: 'POST', body: JSON.stringify({ target_role: $('#career-target-role').value.trim(), location: $('#career-location').value.trim(), limit: 10 }) });
+    state.digestJobs = data.results || [];
+    if (data.search_available === false) {
+      $('#career-digest-results').innerHTML = `<div class="career-empty-line">${escapeHtml(data.message || 'Live search is not configured.')}</div>`;
+    } else if (!state.digestJobs.length) {
+      $('#career-digest-results').innerHTML = `<div class="career-digest-heading"><span>${escapeHtml(data.query || '')}</span><strong>No new roles</strong></div><div class="career-empty-line">No new listings since the last refresh. Saved roles are automatically excluded.</div>`;
+    } else {
+      $('#career-digest-results').innerHTML = `<div class="career-digest-heading"><span>${escapeHtml(data.query || '')}</span><strong>${state.digestJobs.length} new role${state.digestJobs.length === 1 ? '' : 's'}</strong></div><button class="button-secondary career-email-digest" id="career-email-digest" type="button" ${$('#career-digest-email').value.trim() ? '' : 'disabled'}>Email this digest</button><div id="career-digest-cards"></div>`;
+      renderCareerResults($('#career-digest-cards'), state.digestJobs, 'digest');
+    }
+    await loadCareerPipeline();
+  } catch (error) {
+    $('#career-digest-results').innerHTML = `<div class="career-empty-line">${escapeHtml(error.message)}</div>`;
+  } finally { setBusy(button, false); }
+});
+
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('#career-email-digest');
+  if (!button) return;
+  setBusy(button, true, 'Sending…');
+  try {
+    const result = await api('/career/digest/email', { method: 'POST' });
+    toast(result.message || 'Digest email sent.');
+  } catch (error) { toast(error.message, 'error'); }
+  finally { setBusy(button, false); }
+});
+
+async function loadCareerPipeline() {
+  try { renderCareerPipeline(await api('/career/roles')); }
+  catch (error) { $('#career-roles').innerHTML = `<p class="career-empty-line">${escapeHtml(error.message)}</p>`; }
+}
+
+document.addEventListener('click', async (event) => {
+  const copyButton = event.target.closest('[data-copy-target]');
+  if (copyButton) {
+    const field = document.getElementById(copyButton.dataset.copyTarget);
+    if (field) {
+      try { await navigator.clipboard.writeText(field.value); toast('Draft copied.'); }
+      catch { field.focus(); field.select(); toast('Select and copy the draft.'); }
+    }
+    return;
+  }
+  const button = event.target.closest('[data-career-action]');
+  if (!button || button.disabled) return;
+  const source = button.dataset.source;
+  const index = Number(button.dataset.index);
+  const job = source === 'digest' ? state.digestJobs[index] : state.matchJobs[index];
+  if (!job) return;
+  const card = button.closest('[data-career-card]');
+  const panel = card.querySelector('.career-role-output');
+  if (button.dataset.careerAction === 'save') {
+    button.disabled = true;
+    button.textContent = 'Saving…';
+    try {
+      const response = await api('/career/roles', { method: 'POST', body: JSON.stringify(job) });
+      button.textContent = response.created ? 'Saved' : 'Already saved';
+      await loadCareerPipeline();
+      toast(response.created ? 'Role added to your pipeline.' : 'This role is already in your pipeline.');
+    } catch (error) { button.disabled = false; button.textContent = 'Save role'; toast(error.message, 'error'); }
+    return;
+  }
+  const action = button.dataset.careerAction;
+  panel.hidden = false;
+  panel.innerHTML = '<div class="history-loading" role="status">Preparing a profile-grounded draft…</div>';
+  try {
+    const data = await api(action === 'kit' ? '/career/application-kit' : '/career/skill-plan', { method: 'POST', body: JSON.stringify({ job }) });
+    if (action === 'kit') renderApplicationKit(data, panel, card.querySelector('.career-role-output').id);
+    else {
+      panel.innerHTML = `<div class="career-output-heading"><div><span class="section-kicker">PRACTICAL NEXT STEPS</span><h4>${escapeHtml(data.title)}</h4></div><strong>${escapeHtml(data.status)}</strong></div><p class="career-output-notice">${escapeHtml(data.note)}</p><ol class="skill-plan-list">${(data.steps || []).map((step) => `<li><strong>${escapeHtml(step.title)}</strong><span>${escapeHtml(step.detail)}</span></li>`).join('')}</ol>`;
+    }
+  } catch (error) { panel.innerHTML = `<p class="career-output-notice">${escapeHtml(error.message)}</p>`; }
+});
+
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest('.pipeline-edit');
+  if (!form) return;
+  event.preventDefault();
+  const card = form.closest('[data-pipeline-role]');
+  const values = Object.fromEntries(new FormData(form).entries());
+  try {
+    await api(`/career/roles/${encodeURIComponent(card.dataset.pipelineRole)}`, { method: 'PATCH', body: JSON.stringify(values) });
+    await loadCareerPipeline();
+    toast('Application progress updated.');
+  } catch (error) { toast(error.message, 'error'); }
+});
+
 function renderProfile(data) {
   const analysis = data.analysis || {};
   state.profile = analysis;
   const skills = Array.isArray(analysis.skills) ? analysis.skills : [];
+  const links = Array.isArray(analysis.links) ? analysis.links.filter((link) => {
+    try { return ['http:', 'https:'].includes(new URL(link.url).protocol); } catch { return false; }
+  }) : [];
   const exp = analysis.years_experience ?? analysis.experience_years;
   const experienceFact = exp === undefined || exp === null || exp === ''
     ? '<span class="fact-chip">Experience not specified</span>'
     : `<span class="fact-chip">${escapeHtml(String(exp))} years experience</span>`;
   $('#profile-content').className = 'profile-data';
-  $('#profile-content').innerHTML = `<h3>${escapeHtml(analysis.name || 'Candidate')}</h3><span class="profile-sub">${escapeHtml(analysis.field_of_study || analysis.summary || 'Profile analyzed')}</span><div class="profile-facts">${experienceFact}${analysis.email ? `<span class="fact-chip">${escapeHtml(analysis.email)}</span>` : ''}</div><div class="skills-label">Core skills</div><div class="skills">${skills.length ? skills.map((skill) => `<span class="skill-chip">${escapeHtml(skill)}</span>`).join('') : '<span class="profile-sub">No skills were extracted.</span>'}</div>`;
+  $('#profile-content').innerHTML = `<h3>${escapeHtml(analysis.name || 'Candidate')}</h3><span class="profile-sub">${escapeHtml([analysis.current_role, analysis.field_of_study].filter(Boolean).join(' · ') || analysis.summary || 'Profile analyzed')}</span><div class="profile-facts">${experienceFact}${analysis.email ? `<span class="fact-chip">${escapeHtml(analysis.email)}</span>` : ''}${analysis.phone ? `<span class="fact-chip">${escapeHtml(analysis.phone)}</span>` : ''}</div>${links.length ? `<div class="profile-links">${links.slice(0, 5).map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label || new URL(link.url).hostname.replace(/^www\./, ''))} ↗</a>`).join('')}</div>` : ''}<div class="skills-label">Core skills</div><div class="skills">${skills.length ? skills.map((skill) => `<span class="skill-chip">${escapeHtml(skill)}</span>`).join('') : '<span class="profile-sub">No resume skills were detected. Check the Skills section or import a text-based PDF/DOCX.</span>'}</div><p class="profile-saved-note">Your extracted details are saved in Profile for future sessions.</p>`;
   $('#matches-section').classList.remove('hidden');
 }
 
@@ -636,7 +902,8 @@ const fileInput = $('#resume-file');
 fileInput.addEventListener('change', () => {
   state.file = fileInput.files?.[0] || null;
   $('#upload-title').textContent = state.file ? state.file.name : 'Choose a file or drop it here';
-  $('#upload-caption').textContent = state.file ? `${(state.file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'Your document is processed by AURA.';
+  $('#upload-caption').textContent = state.file ? `${(state.file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'Your current resume is saved in Profile for next time.';
+  $('#resume-analysis-status').hidden = true;
   $('#analyze-button').disabled = !state.file;
 });
 const dropzone = $('#dropzone');
@@ -647,26 +914,47 @@ dropzone.addEventListener('drop', (event) => { if (event.dataTransfer.files.leng
 $('#analyze-button').addEventListener('click', async () => {
   if (!state.file) return;
   if (state.file.size > 10 * 1024 * 1024) { toast('Choose a resume smaller than 10 MB.', 'error'); return; }
-  const button = $('#analyze-button'); setBusy(button, true, 'Analyzing…');
+  const button = $('#analyze-button'); setBusy(button, true, 'Extracting resume details…');
+  $('#resume-analysis-status').textContent = 'Reading your resume and checking its details…';
+  $('#resume-analysis-status').hidden = false;
   try {
     const contentBase64 = await new Promise((resolve, reject) => {
       const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Could not read this file.')); reader.readAsDataURL(state.file);
     });
     const result = await api('/resume/analyze', { method: 'POST', body: JSON.stringify({ file_name: state.file.name, content_base64: contentBase64 }) });
-    renderProfile(result); toast('Resume analysis is ready.');
-  } catch (error) { toast(error.message, 'error'); }
+    renderProfile(result);
+    const extracted = Array.isArray(result.analysis?.skills) ? result.analysis.skills.length : 0;
+    $('#resume-analysis-status').textContent = `${extracted} resume skills detected. Confirm your role, skills, and work history before searching.`;
+    toast(`Resume ready · ${extracted} skills extracted.`);
+  } catch (error) {
+    $('#resume-analysis-status').textContent = `Resume analysis didn’t finish: ${error.message}. Your file is still selected; you can retry.`;
+    toast(error.message, 'error');
+  }
   finally { setBusy(button, false); button.disabled = !state.file; }
 });
 
 $('#match-button').addEventListener('click', async () => {
   if (!state.profile) return;
   const button = $('#match-button'); setBusy(button, true, 'Searching…');
+  $('#matches-list').innerHTML = '<div class="career-empty-line" role="status">Searching the saved role brief against your resume evidence…</div>';
   try {
-    const data = await api('/resume/match', { method: 'POST', body: JSON.stringify({ analysis: state.profile, location: $('#location-input').value || 'remote', limit: 10 }) });
+    const data = await api('/resume/match', { method: 'POST', body: JSON.stringify({
+      analysis: state.profile,
+      location: $('#location-input').value || $('#career-location').value || 'remote',
+      target_role: $('#career-target-role').value.trim(),
+      keywords: $('#career-keywords').value.trim(),
+      work_mode: $('#career-work-mode').value,
+      min_salary: $('#career-min-salary').value || null,
+      limit: 10,
+    }) });
     const jobs = data.job_matches || [];
-    $('#matches-list').innerHTML = jobs.length ? `<section class="run-output" data-link-check-section><div class="run-output-heading"><h3>Matching roles</h3><span>${jobs.length} found</span></div><div class="run-result-grid">${jobs.map((job) => renderOpportunity(job, true)).join('')}</div><button class="check-links" type="button" data-check-links>Check links</button></section>` : `<div class="empty-state"><h3>${data.message ? 'Live search needs setup' : 'No matches found'}</h3><p>${escapeHtml(data.message || 'Try a different location preference.')}</p><button class="reset-link" id="retry-match-search" type="button">Search again</button></div>`;
+    state.matchJobs = jobs;
     $('#retry-match-search')?.addEventListener('click', () => $('#match-button').click());
-  } catch (error) { toast(error.message, 'error'); }
+  } catch (error) {
+    $('#matches-list').innerHTML = `<div class="empty-state"><h3>Role search couldn’t finish</h3><p>${escapeHtml(error.message)}. Check your live search setup and retry.</p><button class="reset-link" id="retry-match-search" type="button">Search again</button></div>`;
+    $('#retry-match-search')?.addEventListener('click', () => $('#match-button').click());
+    toast(error.message, 'error');
+  }
   finally { setBusy(button, false); }
 });
 
@@ -687,44 +975,153 @@ async function loadCapabilities() {
   }
 }
 
-async function loadInsights() {
-  $('#insight-metrics').innerHTML = '<div class="history-loading" role="status">Loading workspace insights…</div>';
-  try {
-    const [evaluation, memory] = await Promise.all([api('/evaluation'), api('/memory')]);
-    const metrics = [
-      ['Total journeys', evaluation.total_runs ?? 0, 'Lifetime executions'],
-      ['Success rate', `${Math.round((evaluation.success_rate || 0) * 100)}%`, `${evaluation.completed_runs ?? 0} complete · ${evaluation.partial_runs ?? 0} partial`],
-      ['Self-healing', `${Math.round((evaluation.recovery_rate || 0) * 100)}%`, 'Autonomous recoveries'],
-      ['Verification', `${Math.round((evaluation.verification_coverage || 0) * 100)}%`, 'Outputs verified'],
-    ];
-    $('#insight-metrics').innerHTML = metrics.map(([label, value, note]) => `<div class="insight-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>`).join('');
-    const planners = Object.entries(evaluation.planner_comparison || {});
-    $('#planner-breakdown').innerHTML = planners.length ? planners.map(([name, stats]) => `<div class="breakdown-row"><span>${escapeHtml(name)} planner</span><strong>${escapeHtml(stats.runs)} runs · ${Math.round((stats.success_rate || 0) * 100)}% success${stats.partial_runs ? ` · ${escapeHtml(stats.partial_runs)} partial` : ''}</strong></div>`).join('') : '<div class="breakdown-empty">Planner comparisons appear as journeys are recorded.</div>';
-    const faults = Object.entries(evaluation.failure_categories || {});
-    $('#fault-breakdown').innerHTML = faults.length ? faults.map(([name, count]) => `<div class="breakdown-row"><span>${escapeHtml(name.replaceAll('_', ' '))}</span><strong>${escapeHtml(count)}</strong></div>`).join('') : '<div class="breakdown-empty">No faults recorded. Your journeys are looking good.</div>';
-    $('#memory-content').textContent = JSON.stringify(memory, null, 2);
-  } catch (error) {
-    $('#insight-metrics').innerHTML = `<div class="empty-state"><h3>Insights are unavailable</h3><p>${escapeHtml(error.message)}</p><button class="reset-link" id="retry-insights" type="button">Try again</button></div>`;
-    $('#retry-insights')?.addEventListener('click', loadInsights);
-  }
+const worldThemes = {
+  making: { label: 'Making', point: [245, 75] },
+  learning: { label: 'Learning', point: [490, 105] },
+  discovery: { label: 'Discovery', point: [575, 220] },
+  writing: { label: 'Writing', point: [420, 285] },
+  design: { label: 'Design', point: [165, 265] },
+  life: { label: 'Life', point: [95, 155] },
+};
+
+function renderWorldConstellation(activity) {
+  const center = [335, 180];
+  const nodes = Object.entries(worldThemes).map(([key, theme], index) => {
+    const count = Number(activity[key] || 0);
+    const [x, y] = theme.point;
+    const active = count > 0;
+    const line = `<line class="world-star-link ${active ? 'lit' : ''}" x1="${center[0]}" y1="${center[1]}" x2="${x}" y2="${y}" style="--link-order:${index}"/>`;
+    const star = `<g class="world-star-node ${active ? 'lit' : ''}" style="--star-order:${index}"><circle cx="${x}" cy="${y}" r="${active ? 13 : 9}"/><path d="M${x} ${y - 5}l1.5 3.5L${x + 5} ${y}l-3.5 1.5L${x} ${y + 5}l-1.5-3.5L${x - 5} ${y}l3.5-1.5Z"/><text x="${x}" y="${y + 27}" text-anchor="middle">${escapeHtml(theme.label)}${count ? ` · ${count}` : ''}</text></g>`;
+    return line + star;
+  }).join('');
+  $('#world-constellation').innerHTML = `<svg viewBox="0 0 670 350" role="img" aria-label="Constellation of curiosity themes"><defs><radialGradient id="worldCore"><stop stop-color="var(--paper-accent)" stop-opacity=".3"/><stop offset="1" stop-color="var(--paper-accent)" stop-opacity="0"/></radialGradient></defs><circle class="world-core-glow" cx="${center[0]}" cy="${center[1]}" r="62"/><g>${nodes}</g><circle class="world-core-ring" cx="${center[0]}" cy="${center[1]}" r="21"/><path class="world-core-star" d="M${center[0]} ${center[1] - 10}l3 7L${center[0] + 10} ${center[1]}l-7 3L${center[0]} ${center[1] + 10}l-3-7L${center[0] - 10} ${center[1]}l7-3Z"/></svg>`;
 }
 
-$('#preference-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try {
-    await api('/memory/preference', { method: 'POST', body: JSON.stringify({ key: $('#preference-key').value.trim(), value: $('#preference-value').value.trim() }) });
-    $('#preference-key').value = ''; $('#preference-value').value = ''; await loadInsights(); toast('Preference saved.');
-  } catch (error) { toast(error.message, 'error'); }
-});
-$('#memory-refresh').addEventListener('click', loadInsights);
-$('#memory-reset').addEventListener('click', async () => {
-  if (!window.confirm('Reset the AURA memory archive? This clears saved preferences and remembered context.')) return;
-  try { await api('/memory', { method: 'DELETE' }); await loadInsights(); toast('Memory archive reset.'); }
-  catch (error) { toast(error.message, 'error'); }
+const worldExperiences = [
+  { id: 'wind-garden', title: 'The garden that plays the wind', category: 'making', tag: 'SOUND × NATURE', icon: '♫', intro: 'Someone plants glass reeds across a quiet hillside. When the wind arrives, the whole garden begins to sing.', question: 'Where would you wander first?', choices: [{ label: 'Through the low notes', insight: 'Near the ground, the reeds make a slow, warm hum. A path through them could turn a walk into an instrument.' }, { label: 'Up where it whistles', insight: 'At the hilltop, thin glass catches the quickest winds. The melody changes with the weather—no two evenings sound alike.' }, { label: 'Find the secret rhythm', insight: 'Maybe the garden needs one reed that never sings. The silence would make every other note easier to hear.' }] },
+  { id: 'forest-city', title: 'A city borrowed from trees', category: 'design', tag: 'CITIES × FORESTS', icon: '⌁', intro: 'Imagine a city that copies a forest: no single centre, plenty of small paths, and shade wherever people gather.', question: 'What should it borrow first?', choices: [{ label: 'The canopy', insight: 'A web of shaded walkways joins rooftops like branches. You could cross the whole neighbourhood without stepping into the midday sun.' }, { label: 'The forest floor', insight: 'Tiny shared courtyards make room for chance encounters. The city feels less like a machine and more like a place that can breathe.' }, { label: 'The roots', insight: 'Quiet routes carry water, warmth, and messages beneath the streets. The most useful part of the city is the part nobody sees.' }] },
+  { id: 'deep-sea-postcard', title: 'A postcard from the dark ocean', category: 'discovery', tag: 'OCEAN × LIGHT', icon: '◌', intro: 'Far below the bright surface, a tiny glow appears in the water. It might be a signal, a lure, or just a passing thought.', question: 'What do you follow?', choices: [{ label: 'The light that answers back', insight: 'One glow becomes two. The darkness is not empty; it is full of small conversations, each made of light.' }, { label: 'The shadow behind it', insight: 'The shadow moves at its own pace. Perhaps the most interesting thing here is not what shines, but what chooses to stay unseen.' }, { label: 'The current carrying it', insight: 'The glow drifts with a slow hidden river. Follow it and you may find a whole landscape drawn by moving water.' }] },
+  { id: 'dream-library', title: 'The library that keeps dreams', category: 'writing', tag: 'DREAMS × STORIES', icon: '⌑', intro: 'At midnight, a library opens one new room. Every book inside belongs to someone who has not dreamed it yet.', question: 'Which shelf calls to you?', choices: [{ label: 'The unfinished journeys', insight: 'The pages change when you read them. Maybe a story is not a thing you find, but a path you help uncover.' }, { label: 'The impossible inventions', insight: 'Each book describes a machine that almost works. The last page is always blank, waiting for its first builder.' }, { label: 'The familiar places', insight: 'Every room looks like somewhere you know, but one small detail is different. The strange part is how quickly it feels like home.' }] },
+  { id: 'seed-clock', title: 'The seed with its own clock', category: 'life', tag: 'PLANTS × TIME', icon: '❋', intro: 'A seed waits through cold, rain, and long quiet days. It seems to know when the world is finally ready for it.', question: 'What would you ask it?', choices: [{ label: 'What did you notice first?', insight: 'A seed does not need a calendar. It responds to a collection of tiny clues—temperature, moisture, light—until the moment feels right.' }, { label: 'What are you saving?', insight: 'Inside that small shell is a whole first chapter: enough food, a folded beginning, and a plan for reaching the light.' }, { label: 'What if spring never came?', insight: 'Some seeds wait for years. Waiting is not doing nothing; it is a different way of being ready.' }] },
+  { id: 'colour-language', title: 'A colour with no name', category: 'learning', tag: 'COLOUR × LANGUAGE', icon: '◉', intro: 'Picture a colour nobody has named yet. You can see it clearly, but explaining it makes it disappear.', question: 'How would you describe it?', choices: [{ label: 'By the sound it makes', insight: 'Maybe this colour rings like a glass touched with a wet finger—clear at first, then warm around the edges.' }, { label: 'By the place it belongs', insight: 'It looks like the last light in a room after everyone has gone: quiet, familiar, and a little bit changed.' }, { label: 'By what it makes you feel', insight: 'It feels like remembering a place you have never visited. The name might matter less than the feeling it leaves behind.' }] },
+];
+
+function renderWorldPortals(data) {
+  const activity = data.activity || {};
+  const recent = new Set((data.discoveries || []).slice(0, 2).map((item) => item.title));
+  const selection = [...worldExperiences].sort((a, b) => (activity[a.category] || 0) - (activity[b.category] || 0) || a.title.localeCompare(b.title)).filter((item) => !recent.has(item.title)).slice(0, 3);
+  $('#world-portals').innerHTML = selection.map((item, index) => `<button type="button" class="world-portal" data-world-open="${item.id}"><span class="portal-stamp">${item.icon}</span><span class="portal-copy"><small>${escapeHtml(item.tag)}</small><strong>${escapeHtml(item.title)}</strong></span><span class="portal-number">0${index + 1}</span></button>`).join('');
+}
+
+function renderWorldRecent(discoveries) {
+  const recent = (discoveries || []).slice(0, 3);
+  $('#world-recent').innerHTML = recent.length ? `<div class="world-recent-label">RECENTLY FOUND</div><div class="world-recent-items">${recent.map((item) => `<span><i>✦</i>${escapeHtml(item.title)}</span>`).join('')}</div>` : '';
+}
+
+function renderWorld(data) {
+  state.world = data;
+  const counts = data.counts || {};
+  const companion = data.companion || { name: 'Mote', rank: 'New spark', points: 0 };
+  const thresholds = [0, 2, 5, 10, 18];
+  const previous = [...thresholds].reverse().find((value) => Number(companion.points) >= value) || 0;
+  const next = companion.next_rank_at;
+  const discoveryCount = Number(counts.discoveries || 0);
+  $('#world-rank').textContent = `${companion.name} · ${companion.rank}`;
+  $('#world-discovery-count').textContent = discoveryCount;
+  $('#world-world-count').textContent = counts.worlds || 0;
+  $('#world-progress-fill').style.width = next ? `${Math.max(8, Math.min(100, ((companion.points - previous) / (next - previous)) * 100))}%` : '100%';
+  $('#world-progress-label').textContent = next ? `${companion.points} discoveries · ${next - companion.points} sparks to the next evolution` : 'Mote has found its way around your whole world.';
+  $('#world-companion-copy').textContent = discoveryCount ? 'Mote remembers the paths you have taken. There are always stranger ones nearby.' : 'Choose a little doorway. Mote will follow—and remember what you find.';
+  const activeThemes = Number(counts.worlds || 0);
+  $('#world-constellation-caption').textContent = activeThemes ? `${activeThemes} of 6 worlds visited` : 'Your first star is waiting.';
+  renderWorldConstellation(data.activity || {});
+  renderWorldPortals(data);
+  renderWorldRecent(data.discoveries || []);
+  if (!state.activeWorldExperience) $('#world-experience').hidden = true;
+}
+
+async function loadWorld() {
+  try { renderWorld(await api('/world')); }
+  catch (error) { $('#world-portals').innerHTML = `<p class="world-empty">AURA World could not load: ${escapeHtml(error.message)}</p>`; }
+}
+
+function openWorldExperience(experienceId) {
+  const experience = typeof experienceId === 'string' ? worldExperiences.find((item) => item.id === experienceId) : experienceId;
+  if (!experience) return;
+  state.activeWorldExperience = experience;
+  state.worldChoice = null;
+  renderActiveWorldExperience();
+}
+
+function renderActiveWorldExperience() {
+  const experience = state.activeWorldExperience;
+  const panel = $('#world-experience');
+  if (!experience) { panel.hidden = true;return; }
+  panel.hidden = false;
+  const saved = (state.world?.discoveries || []).some((item) => item.title === experience.title);
+  const choice = state.worldChoice === null ? null : experience.choices[state.worldChoice];
+  panel.innerHTML = `<div class="experience-topline"><span>${escapeHtml(experience.tag)}</span><button type="button" class="experience-back" data-world-close>← All doorways</button></div><div class="experience-title-line"><span class="experience-stamp">${experience.icon}</span><div><span class="section-kicker">A TINY INTERACTIVE TALE</span><h3>${escapeHtml(experience.title)}</h3></div></div><p class="experience-intro">${escapeHtml(experience.intro)}</p><h4>${escapeHtml(experience.question)}</h4><div class="experience-choices">${experience.choices.map((item, index) => `<button type="button" class="experience-choice ${state.worldChoice === index ? 'selected' : ''}" data-world-choice="${index}"><span>${String.fromCharCode(65 + index)}</span>${escapeHtml(item.label)}<i>↗</i></button>`).join('')}</div>${choice ? `<div class="experience-reveal"><span>✦ AURA REVEALED</span><p>${escapeHtml(choice.insight)}</p>${saved ? '<div class="experience-kept">Already part of your constellation ✦</div>' : '<button type="button" class="button-primary" data-world-collect>Keep this discovery <span class="button-arrow">→</span></button>'}</div>` : ''}`;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function openWorldRemix() {
+  const activity = state.world?.activity || {};
+  const concepts = {
+    making: 'tiny inventions', learning: 'impossible questions', discovery: 'the deep ocean',
+    writing: 'unfinished stories', design: 'future cities', life: 'wild gardens',
+  };
+  const entries = Object.keys(concepts).map((key) => ({ key, world: concepts[key], visits: Number(activity[key] || 0) }));
+  const mostVisited = Math.max(...entries.map((item) => item.visits));
+  const familiarPool = mostVisited ? entries.filter((item) => item.visits === mostVisited) : entries;
+  const familiar = familiarPool[Math.floor(Math.random() * familiarPool.length)];
+  const otherEntries = entries.filter((item) => item.key !== familiar.key);
+  const leastVisited = Math.min(...otherEntries.map((item) => item.visits));
+  const quietPool = otherEntries.filter((item) => item.visits === leastVisited);
+  const quiet = quietPool[Math.floor(Math.random() * quietPool.length)];
+  const worlds = [familiar, quiet].sort(() => Math.random() - .5);
+  const [left, right] = worlds;
+  openWorldExperience({
+    id: `crossing-${Date.now()}`,
+    title: `${left.world} × ${right.world}`,
+    category: quiet.key,
+    categories: [familiar.key, quiet.key],
+    tag: `AURA CROSSING · ${worldThemes[familiar.key].label.toUpperCase()} × ${worldThemes[quiet.key].label.toUpperCase()}`,
+    icon: '✧',
+    intro: `AURA put ${left.world} beside ${right.world}. In this little universe, neither one works quite the way it used to.`,
+    question: 'What should happen when they meet?',
+    choices: [
+      { label: 'Let them trade secrets', insight: `A quiet exchange begins: ${left.world} lends ${right.world} a new way to change. After that, little traces of one keep appearing inside the other.` },
+      { label: 'Let them change each other', insight: `The rhythm shifts first. ${right.world} begins to move at the pace of ${left.world}, while ${left.world} borrows a new way of hiding.` },
+      { label: 'Make a third, stranger thing', insight: `A third thing appears—small, beautiful, and not entirely useful yet. It could only exist because ${left.world} and ${right.world} met.` },
+    ],
+  });
+}
+
+$('#world-surprise')?.addEventListener('click', openWorldRemix);
+
+document.addEventListener('click', async (event) => {
+  const portal = event.target.closest('[data-world-open]');
+  if (portal) { openWorldExperience(portal.dataset.worldOpen);return; }
+  if (event.target.closest('[data-world-close]')) { state.activeWorldExperience = null;renderActiveWorldExperience();return; }
+  const choice = event.target.closest('[data-world-choice]');
+  if (choice) { state.worldChoice = Number(choice.dataset.worldChoice);renderActiveWorldExperience();return; }
+  if (event.target.closest('[data-world-collect]')) {
+    const experience = state.activeWorldExperience;
+    const selected = experience?.choices[state.worldChoice];
+    if (!experience || !selected) return;
+    const button = event.target.closest('[data-world-collect]');
+    setBusy(button, true, 'Saving your discovery…');
+    try {
+      await api('/world/discoveries', { method: 'POST', body: JSON.stringify({ title: experience.title, category: experience.category, categories: experience.categories || [experience.category], choice: selected.label, insight: selected.insight }) });
+      state.activeWorldExperience = null;
+      await loadWorld();
+      toast('A new star found its place in your world.');
+    } catch (error) { setBusy(button, false);toast(error.message, 'error'); }
+  }
 });
 
 async function checkConnection() {
   try { await api('/health'); $('#connection-label').textContent = 'System online'; $('.connection-dot').style.background = '#36A871'; }
   catch { $('#connection-label').textContent = 'API unavailable'; $('.connection-dot').style.background = '#D5676E'; }
 }
-Promise.all([checkConnection(), loadRuns(), loadCapabilities(), loadInsights()]);
+Promise.all([checkConnection(), loadRuns(), loadCapabilities()]);

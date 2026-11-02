@@ -6,13 +6,18 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from src.agent.state_store import get_database_backend
 
 
 class RunStore:
     def __init__(self, path: str | None = None):
         self.path = Path(path or os.getenv("AURA_RUN_STORE", ".aura_runs.json"))
+        self.database = get_database_backend() if path is None else None
 
     def _read(self) -> Dict[str, dict]:
+        if self.database:
+            value = self.database.read_state("runs", {})
+            return value if isinstance(value, dict) else {}
         if not self.path.exists():
             return {}
         try:
@@ -22,6 +27,9 @@ class RunStore:
             return {}
 
     def _write(self, records: Dict[str, dict]) -> None:
+        if self.database:
+            self.database.write_state("runs", records)
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_path = tempfile.mkstemp(
             prefix=f".{self.path.name}.",

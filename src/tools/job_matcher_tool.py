@@ -1,5 +1,6 @@
 """Job matcher tool - searches for jobs based on resume analysis."""
 from typing import Tuple, List
+from src.utils.career_matching import score_role
 
 
 def run(args: dict, context: dict) -> Tuple[List[str], dict]:
@@ -26,27 +27,45 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
         return logs, {"error": "No analysis available"}
     
     # Build search query from analysis
-    field = analysis.get("field_of_study", "")
+    field = str(analysis.get("field_of_study", "") or "").strip()
     skills = analysis.get("skills", [])
     interests = analysis.get("career_interests", [])
     keywords = analysis.get("job_keywords", [])
-    
-    # Prefer role intent over degree names, then add a couple of skills.
-    search_terms = []
-    search_terms.extend(interests[:2])
-    if not search_terms:
-        search_terms.extend(keywords[:2])
-    if not search_terms and field:
-        search_terms.append(field)
+    skills = skills if isinstance(skills, list) else [skills]
+    interests = interests if isinstance(interests, list) else [interests]
+    keywords = keywords if isinstance(keywords, list) else [keywords]
+
+    # Keep the query concise: role intent first, then saved search words and a
+    # couple of resume skills. Avoid repeating the same words from AI output.
+    target_role = str(args.get("target_role", "") or "").strip()
+    raw_keywords = args.get("keywords", "") or ""
+    preference_terms = [part.strip() for part in raw_keywords.split(",") if part.strip()] if isinstance(raw_keywords, str) else list(raw_keywords)
+    search_terms = [target_role]
+    if not target_role:
+        search_terms.extend(interests[:2] or keywords[:3])
+        if not any(str(term or "").strip() for term in search_terms):
+            search_terms.append(field)
+    search_terms.extend(preference_terms[:3])
     search_terms.extend(skills[:2])
+    search_terms.append(args.get("work_mode", ""))
     deduped_terms = []
+    current_words = set()
     for term in search_terms:
-        term = str(term).strip()
-        if term and term.casefold() not in {item.casefold() for item in deduped_terms}:
+        term = str(term or "").strip()
+        words = set(term.casefold().split())
+        if term and term.casefold() not in {item.casefold() for item in deduped_terms} and not words.issubset(current_words):
             deduped_terms.append(term)
+            current_words.update(words)
     
     location = args.get("location", "remote")
-    search_query = f"{' '.join(deduped_terms[:4])} jobs {location}".strip()
+    salary = args.get("min_salary")
+    if salary:
+        try:
+            salary = f"{float(salary) / 100000:g} LPA"
+        except (TypeError, ValueError):
+            salary = ""
+    # Salary is better expressed in Indian LPA than as a raw rupee amount.
+    search_query = " ".join([*deduped_terms[:6], *([salary] if salary else []), "jobs", str(location or "remote")]).strip()
     
     logs.append(f"Searching for: {search_query}")
     
@@ -80,7 +99,7 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
         is_job = any(keyword in title_lower or keyword in snippet_lower 
                     for keyword in ["job", "career", "hiring", "position", "opening"])
         
-        job_matches.append({
+        job = {
             "title": result.get("title"),
             "url": result.get("url"),
             "snippet": result.get("snippet"),
@@ -95,7 +114,11 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
             "employment_type": result.get("employment_type"),
             "relevance": result.get("relevance") or ("Strong match" if is_job else "Related"),
             "matched_skills": [skill for skill in skills if skill.lower() in snippet_lower]
-        })
+        }
+        job.update(score_role(analysis, job, str(args.get("location", "remote"))))
+        job_matches.append(job)
+
+    job_matches.sort(key=lambda item: (item.get("fit_score", 0), len(item.get("matched_skills", []))), reverse=True)
     
     logs.append(f"Found {len(job_matches)} potential job matches")
     

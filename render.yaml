@@ -6,9 +6,29 @@ services:
     plan: free
     envVars:
       - key: PLANNER_MODE
-        value: rule
+        value: llm
       - key: SCRAPER_MODE
         value: requests
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AURA_STORAGE_BACKEND
+        value: neon
+      - key: DATABASE_URL
+        sync: false
+      - key: AURA_AUTH_REQUIRED
+        value: "true"
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_JWT_KEY
+        sync: false
+      - key: CLERK_AUTHORIZED_PARTIES
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: SERPAPI_KEY

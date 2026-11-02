@@ -40,4 +40,18 @@ def get_llm_client() -> tuple[Any, str, str] | None:
         model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
         return OpenAI(api_key=api_key, timeout=timeout), model, "OpenAI"
 
-    raise RuntimeError(f"Unsupported LLM_PROVIDER: {provider}. Use 'ollama' or 'openai'.")
+    if provider == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key or api_key == "your-gemini-api-key-here":
+            return None
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
+        return OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+        ), model, "Google Gemini"
+
+    raise RuntimeError(
+        f"Unsupported LLM_PROVIDER: {provider}. Use 'ollama', 'openai', or 'gemini'."
+    )

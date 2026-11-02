@@ -40,7 +40,10 @@ class LLMPlanner:
         try:
             configured = get_llm_client()
             if configured is None:
-                raise RuntimeError("No LLM is configured; set LLM_PROVIDER=ollama or add OPENAI_API_KEY")
+                    raise RuntimeError(
+                        "No LLM is configured; set LLM_PROVIDER=ollama, openai, or gemini "
+                        "and provide the matching API key"
+                    )
             client, model, _provider_name = configured
 
             system_prompt = """You are a task planning agent. Given a user command, break it down into ordered steps using these tools:

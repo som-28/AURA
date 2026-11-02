@@ -78,6 +78,40 @@ def _extract_from_docx(file_path: str) -> str:
         return f"Error reading DOCX: {e}"
 
 
+def _extract_hyperlinks(file_path: str, extension: str) -> list:
+    """Return embedded hyperlink targets and their visible labels when available."""
+    links = []
+    try:
+        if extension == '.docx':
+            from docx import Document
+            doc = Document(file_path)
+            rel_attr = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
+            for hyperlink in doc._element.body.xpath('.//w:hyperlink'):
+                rel_id = hyperlink.get(rel_attr)
+                rel = doc.part.rels.get(rel_id) if rel_id else None
+                target = rel.target_ref if rel else ''
+                label = ''.join(node.text or '' for node in hyperlink.xpath('.//w:t')).strip()
+                if target.startswith(('http://', 'https://')):
+                    links.append({"label": label, "url": target})
+        elif extension == '.pdf':
+            import PyPDF2
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                for page in reader.pages:
+                    for annotation_ref in page.get('/Annots', []):
+                        annotation = annotation_ref.get_object()
+                        action = annotation.get('/A')
+                        target = str(action.get('/URI', '')) if action else ''
+                        if target.startswith(('http://', 'https://')):
+                            links.append({"label": '', "url": target})
+    except Exception:
+        return links
+    unique = {}
+    for link in links:
+        unique.setdefault(link['url'], link)
+    return list(unique.values())
+
+
 def _extract_from_txt(file_path: str) -> str:
     """Extract text from TXT file."""
     try:
@@ -127,8 +161,10 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     word_count = len(text.split())
     logs.append(f"Successfully parsed resume ({word_count} words)")
     
+    links = _extract_hyperlinks(file_path, file_ext)
     return logs, {
         "resume_text": text,
         "file_name": file_name,
-        "word_count": word_count
+        "word_count": word_count,
+        "links": links
     }

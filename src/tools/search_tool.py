@@ -8,7 +8,18 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
-def _serpapi_search(query: str, limit: int = 5, engine: str = "google") -> Optional[List[dict]]:
+def _provider_error_label(provider: str, status: int | None = None, detail: object = "") -> str:
+    text = str(detail or "").casefold()
+    if status == 429 or any(word in text for word in ("quota", "rate limit", "monthly limit", "over the limit", "exceeded your limit")):
+        return f"{provider} quota or rate limit reached" + (f" (HTTP {status})" if status else "")
+    if status in {401, 403} or any(word in text for word in ("api key", "apikey", "unauthorized", "authentication", "access denied")):
+        return f"{provider} rejected the configured credentials" + (f" (HTTP {status})" if status else "")
+    if status:
+        return f"{provider} request failed (HTTP {status})"
+    return f"{provider} returned a provider error"
+
+
+def _serpapi_search(query: str, limit: int = 5, engine: str = "google", diagnostics: list[str] | None = None) -> Optional[List[dict]]:
     """Use SerpAPI Google or Google Jobs results."""
     api_key = os.getenv("SERPAPI_KEY")
     if not api_key:
@@ -22,9 +33,13 @@ def _serpapi_search(query: str, limit: int = 5, engine: str = "google") -> Optio
             "api_key": api_key,
             "num": limit,
         }
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
+            if data.get("error"):
+                if diagnostics is not None:
+                    diagnostics.append(_provider_error_label("SerpAPI", detail=data.get("error")))
+                return None
             results = []
             source_items = data.get("jobs_results") if engine == "google_jobs" else data.get("organic_results", [])
             if source_items is None and engine == "google_jobs":
@@ -48,12 +63,16 @@ def _serpapi_search(query: str, limit: int = 5, engine: str = "google") -> Optio
                     "source": item.get("via") or item.get("displayed_link") or "",
                 })
             return results
+        if diagnostics is not None:
+            diagnostics.append(_provider_error_label("SerpAPI", status=resp.status_code))
     except Exception as e:
-        print(f"SerpAPI error: {e}")
+        if diagnostics is not None:
+            diagnostics.append(f"SerpAPI request failed ({type(e).__name__})")
+        print(f"SerpAPI error: {type(e).__name__}")
     return None
 
 
-def _google_custom_search(query: str, limit: int = 5) -> Optional[List[dict]]:
+def _google_custom_search(query: str, limit: int = 5, diagnostics: list[str] | None = None) -> Optional[List[dict]]:
     """Use Google Custom Search API."""
     api_key = os.getenv("GOOGLE_SEARCH_API_KEY")
     engine_id = os.getenv("GOOGLE_SEARCH_ENGINE_ID")
@@ -68,9 +87,13 @@ def _google_custom_search(query: str, limit: int = 5) -> Optional[List[dict]]:
             "q": query,
             "num": limit,
         }
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
+            if data.get("error"):
+                if diagnostics is not None:
+                    diagnostics.append(_provider_error_label("Google Custom Search", detail=data.get("error")))
+                return None
             results = []
             for item in data.get("items", [])[:limit]:
                 results.append({
@@ -79,9 +102,33 @@ def _google_custom_search(query: str, limit: int = 5) -> Optional[List[dict]]:
                     "snippet": item.get("snippet", ""),
                 })
             return results
+        if diagnostics is not None:
+            diagnostics.append(_provider_error_label("Google Custom Search", status=resp.status_code))
     except Exception as e:
-        print(f"Google Custom Search error: {e}")
+        if diagnostics is not None:
+            diagnostics.append(f"Google Custom Search request failed ({type(e).__name__})")
+        print(f"Google Custom Search error: {type(e).__name__}")
     return None
+
+
+def _is_job_search_landing_page(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower().removeprefix("www.")
+        path = parts.path.casefold()
+    except ValueError:
+        return False
+    if host.endswith("indeed.com") and re.match(r"^/q-.+-jobs?\.html$", path):
+        return True
+    if host.endswith("shine.com") and path.startswith("/job-search/"):
+        return True
+    if host.endswith("linkedin.com") and path.startswith(("/jobs/search", "/jobs/collections")):
+        return True
+    if host.endswith("naukri.com") and path.startswith("/jobs-in-"):
+        return True
+    if host.endswith("glassdoor.com") and path in {"/job/jobs.htm", "/jobs.htm"}:
+        return True
+    return False
 
 
 def _curate_results(query: str, items: List[dict], limit: int, provider: str) -> List[dict]:
@@ -108,6 +155,8 @@ def _curate_results(query: str, items: List[dict], limit: int, provider: str) ->
             if parts.scheme not in {"http", "https"} or not parts.hostname:
                 continue
             host = parts.hostname.lower().removeprefix("www.")
+            if job_intent and _is_job_search_landing_page(raw_url):
+                continue
             query_items = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
                            if not key.lower().startswith(("utm_", "gclid", "fbclid"))]
             canonical = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), urlencode(query_items), ""))
@@ -172,6 +221,7 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     query = args.get("query", "").strip()
     limit = int(args.get("limit", 5))
     logs = []
+    diagnostics = []
 
     has_serpapi = bool(os.getenv("SERPAPI_KEY"))
     has_google = bool(os.getenv("GOOGLE_SEARCH_API_KEY") and os.getenv("GOOGLE_SEARCH_ENGINE_ID"))
@@ -179,16 +229,16 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     # Prefer structured employer/location/apply links for jobs, then fall back
     # to regular web results when the Jobs engine has no matching listings.
     job_intent = any(word in query.lower() for word in ("job", "role", "intern", "career", "position", "vacanc", "fresher", "hiring", "opening"))
-    results = _serpapi_search(query, limit, "google_jobs") if has_serpapi and job_intent else None
+    results = _serpapi_search(query, limit, "google_jobs", diagnostics) if has_serpapi and job_intent else None
     if not results:
-        results = _serpapi_search(query, limit)
+        results = _serpapi_search(query, limit, diagnostics=diagnostics)
     if results is not None:
         results = _curate_results(query, results, limit, "SerpAPI")
         logs.append(f"Search: found {len(results)} curated results using SerpAPI")
         return logs, {"results": results, "search_available": True}
 
     # Try Google Custom Search
-    results = _google_custom_search(query, limit)
+    results = _google_custom_search(query, limit, diagnostics)
     if results is not None:
         results = _curate_results(query, results, limit, "Google Custom Search")
         logs.append(f"Search: found {len(results)} curated results using Google Custom Search")
@@ -197,6 +247,7 @@ def run(args: dict, context: dict) -> Tuple[List[str], dict]:
     if not has_serpapi and not has_google:
         message = "Live job search is not configured. Add SERPAPI_KEY or Google Custom Search credentials to .env."
     else:
-        message = "The configured search provider did not return results. Check its API key, quota, and connection."
+        detail = diagnostics[0] if diagnostics else ""
+        message = f"{detail}. Check the provider key, quota, and connection." if detail else "The configured search provider did not return results. Check its API key, quota, and connection."
     logs.append(message)
     return logs, {"results": [], "search_available": False, "message": message}

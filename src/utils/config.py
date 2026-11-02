@@ -11,6 +11,8 @@ def load_config():
         "OLLAMA_MODEL": os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
         "LLM_REQUEST_TIMEOUT": os.getenv("LLM_REQUEST_TIMEOUT", "120"),
         "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
+            "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY"),
+            "GEMINI_MODEL": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         "SMTP_HOST": os.getenv("SMTP_HOST"),
         "SMTP_PORT": os.getenv("SMTP_PORT"),
         "SMTP_USER": os.getenv("SMTP_USER"),

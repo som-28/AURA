@@ -10,11 +10,17 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from src.agent.state_store import get_database_backend
 
 
 class Memory:
     def __init__(self, path: str | None = None):
         self.path = Path(path or os.getenv("AURA_MEMORY_STORE", "agent_memory.json"))
+        self.database = get_database_backend() if path is None else None
+        if self.database:
+            if not self.database.read_state("memory", None):
+                self._write({"preferences": {}, "context": {}, "recent_runs": []})
+            return
         if not self.path.exists():
             self._write({
                 "preferences": {},
@@ -23,6 +29,9 @@ class Memory:
             })
 
     def _read(self) -> Dict[str, Any]:
+        if self.database:
+            value = self.database.read_state("memory", {"preferences": {}, "context": {}, "recent_runs": []})
+            return value if isinstance(value, dict) else {"preferences": {}, "context": {}, "recent_runs": []}
         if not self.path.exists():
             return {"preferences": {}, "context": {}, "recent_runs": []}
         try:
@@ -37,6 +46,9 @@ class Memory:
             return {"preferences": {}, "context": {}, "recent_runs": []}
 
     def _write(self, data: Dict[str, Any]) -> None:
+        if self.database:
+            self.database.write_state("memory", data)
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_path = tempfile.mkstemp(
             prefix=f".{self.path.name}.",
